@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -7,23 +7,14 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <PropertyGroup>
-    <!-- PublishAot implies SelfContained and produces a single native image, so
-         PublishSingleFile is neither needed nor compatible. -->
-    <PublishAot>true</PublishAot>
-    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
-    <InvariantGlobalization>true</InvariantGlobalization>
-  </PropertyGroup>
-
-  <PropertyGroup>
-    <!-- PublishAot only runs these on publish; enabling them here surfaces AOT breakages
-         on a plain build, where TreatWarningsAsErrors turns them into failures. -->
-    <EnableAotAnalyzer>true</EnableAotAnalyzer>
-    <EnableTrimAnalyzer>true</EnableTrimAnalyzer>
-    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
-  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="DotNetMCP.Tests" />
+  </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
+    <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" />
     <PackageReference Include="ModelContextProtocol" />

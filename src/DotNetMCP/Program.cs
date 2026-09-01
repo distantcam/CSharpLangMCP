@@ -1,4 +1,4 @@
-﻿using DotNetMCP.Lsp;
+using DotNetMCP.Roslyn;
 using DotNetMCP.Tools;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -9,6 +9,7 @@ try
 {
     var builder = Host.CreateApplicationBuilder(args);
 
+    // The MCP protocol owns stdout, so every log line has to go to stderr.
     builder.Logging.AddConsole(options =>
     {
         options.LogToStandardErrorThreshold = LogLevel.Trace;
@@ -20,8 +21,8 @@ try
 
     builder.Logging.SetMinimumLevel(logLevel);
 
-    builder.Services.AddSingleton<SolutionFilter>();
-    builder.Services.AddSingleton<LspClient>();
+    // One workspace shared by every tool; tool instances themselves are per-invocation.
+    builder.Services.AddSingleton<RoslynWorkspaceService>();
 
     builder.Services
         .AddMcpServer(options =>
@@ -29,11 +30,14 @@ try
             options.ServerInfo = new Implementation
             {
                 Name = "dotnet-mcp",
-                Version = "1.0.0"
+                Version = "2.0.0"
             };
         })
         .WithStdioServerTransport()
-        .WithTools<CSharpTools>();
+        .WithTools<WorkspaceTools>()
+        .WithTools<NavigationTools>()
+        .WithTools<StructureTools>()
+        .WithTools<EditTools>();
 
     var app = builder.Build();
     await app.RunAsync();
