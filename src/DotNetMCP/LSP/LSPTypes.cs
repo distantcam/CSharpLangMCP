@@ -282,6 +282,12 @@ public record ServerInfo
     public string? Version { get; init; }
 }
 
+/// <summary>
+/// Params for the "initialized" notification. Empty per the LSP spec, but it must be a
+/// declared type rather than an anonymous object so the source generator can emit it.
+/// </summary>
+public record InitializedParams;
+
 #endregion
 
 #region Document Sync

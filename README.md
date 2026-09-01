@@ -14,17 +14,33 @@ dotnet tool install --global csharp-ls --version 0.27.0
 
 It is looked up on `PATH`, then at `%USERPROFILE%\.dotnet\tools\csharp-ls.exe`, then `/usr/local/bin/csharp-ls` and `/usr/bin/csharp-ls`.
 
-Building additionally requires the .NET 10 SDK. Running does not — see below.
+Running requires nothing else — see below. **Building** needs the .NET 10 SDK plus, because the project is compiled with Native AOT, the Visual Studio **Desktop development with C++** workload for the MSVC linker.
 
 ## Build
 
-`dotnet publish` produces a **self-contained, single-file win-x64 executable**, so the machine running it does not need the .NET runtime installed:
+`dotnet publish` produces a **Native AOT win-x64 executable**, so the machine running it needs neither the .NET runtime nor any sidecar files:
 
 ```
 dotnet publish src/DotNetMCP/DotNetMCP.csproj -c Release -o dist
 ```
 
-Output: `dist\DotNetMCP.exe` (~74 MB).
+Output: `dist\DotNetMCP.exe` (~14 MB, no `.dll` or `runtimeconfig.json` alongside it).
+
+### If the native link step fails
+
+The AOT toolchain shells out to `vswhere.exe` to locate the MSVC linker. In a plain shell it usually is not on `PATH`, and the publish fails late with:
+
+```
+error MSB3073: ... 'vswhere.exe' is not recognized ... link.exe ... exited with code 123
+```
+
+Publish from a **Developer PowerShell for VS**, or put `vswhere` on `PATH` for the session first:
+
+```
+$env:PATH = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer;$env:PATH"
+```
+
+Note that a plain `dotnet build` succeeds either way — only the native link needs the C++ toolchain.
 
 # Configuration
 

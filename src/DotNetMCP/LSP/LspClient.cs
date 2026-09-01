@@ -2,7 +2,7 @@
 using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
+using System.Text.Json.Serialization.Metadata;
 using Microsoft.Extensions.Logging;
 
 namespace DotNetMCP.Lsp;
@@ -16,6 +16,7 @@ public class LspClient : IAsyncDisposable
     private int _requestId;
     private readonly ConcurrentDictionary<int, TaskCompletionSource<JsonElement>> _pendingRequests = new();
     private readonly ConcurrentDictionary<string, PublishDiagnosticsParams> _diagnosticsCache = new();
+    private readonly ConcurrentDictionary<string, int> _documentVersions = new();
     private CancellationTokenSource? _readLoopCts;
     private Task? _readLoopTask;
     private bool _isInitialized;
@@ -23,13 +24,8 @@ public class LspClient : IAsyncDisposable
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private string? _filteredWorkspacePath;
 
-    // No JsonStringEnumConverter: every LSP enum is numeric on the wire (triggerKind: 1,
-    // severity: 2, ...). Serializing them as strings makes the server reject the request.
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
-    };
+    // Serialization metadata lives in LspJsonContext (source-generated).
+    private static readonly LspJsonContext Json = LspJsonContext.Default;
 
     public event Action<PublishDiagnosticsParams>? DiagnosticsReceived;
 
@@ -69,7 +65,7 @@ public class LspClient : IAsyncDisposable
             {
                 try
                 {
-                    await SendRequestAsync<object>("shutdown", null, CancellationToken.None);
+                    await SendRequestAsync("shutdown", null, Json.JsonElement, CancellationToken.None);
                     await SendNotificationAsync("exit", null, CancellationToken.None);
 
                     if (!_lspProcess.WaitForExit(3000))
@@ -93,6 +89,7 @@ public class LspClient : IAsyncDisposable
             _requestId = 0;
             _pendingRequests.Clear();
             _diagnosticsCache.Clear();
+            _documentVersions.Clear();
 
             _solutionFilter.Cleanup();
 
@@ -188,7 +185,7 @@ public class LspClient : IAsyncDisposable
                 initResult.ServerInfo?.Version ?? "Unknown");
 
             // Send initialized notification
-            await SendNotificationAsync("initialized", new { }, cancellationToken);
+            await SendNotificationAsync("initialized", new InitializedParams(), cancellationToken);
 
             _isInitialized = true;
             return true;
@@ -299,7 +296,7 @@ public class LspClient : IAsyncDisposable
         };
 
         _logger.LogDebug("InitializeAsync: Workspace folders: {Folders}", workspacePath);
-        var response = await SendRequestAsync<InitializeResult>("initialize", initParams, cancellationToken);
+        var response = await SendRequestAsync("initialize", initParams, Json.InitializeResult, cancellationToken);
         _logger.LogInformation("InitializeAsync: Received response from LSP server");
         return response;
     }
@@ -318,6 +315,11 @@ public class LspClient : IAsyncDisposable
             }
         };
 
+        // Drop any stale diagnostics before the notification goes out, so WaitForDiagnosticsAsync
+        // can only ever see a publish that this version caused.
+        _documentVersions[uri] = 1;
+        _diagnosticsCache.TryRemove(uri, out _);
+
         await SendNotificationAsync("textDocument/didOpen", param, cancellationToken);
         _logger.LogDebug("Opened document: {Uri}", uri);
     }
@@ -335,6 +337,11 @@ public class LspClient : IAsyncDisposable
             ContentChanges = new[] { new TextDocumentContentChangeEvent { Text = content } }
         };
 
+        // The cached diagnostics describe the previous revision; without clearing them
+        // WaitForDiagnosticsAsync would return them instead of waiting for the new publish.
+        _documentVersions[uri] = version;
+        _diagnosticsCache.TryRemove(uri, out _);
+
         await SendNotificationAsync("textDocument/didChange", param, cancellationToken);
         _logger.LogDebug("Updated document: {Uri} (version {Version})", uri, version);
     }
@@ -349,6 +356,7 @@ public class LspClient : IAsyncDisposable
 
         await SendNotificationAsync("textDocument/didClose", param, cancellationToken);
         _diagnosticsCache.TryRemove(uri, out _);
+        _documentVersions.TryRemove(uri, out _);
         _logger.LogDebug("Closed document: {Uri}", uri);
     }
 
@@ -362,18 +370,28 @@ public class LspClient : IAsyncDisposable
     public async Task<PublishDiagnosticsParams?> WaitForDiagnosticsAsync(string filePath, TimeSpan timeout, CancellationToken cancellationToken = default)
     {
         var uri = new Uri(filePath).ToString();
+        _documentVersions.TryGetValue(uri, out var expectedVersion);
         var deadline = DateTime.UtcNow + timeout;
 
         while (DateTime.UtcNow < deadline)
         {
-            if (_diagnosticsCache.TryGetValue(uri, out var diagnostics))
+            if (_diagnosticsCache.TryGetValue(uri, out var diagnostics) && IsCurrent(diagnostics, expectedVersion))
                 return diagnostics;
 
             await Task.Delay(100, cancellationToken);
         }
 
+        // Timed out. Returning the last publish we have beats returning nothing.
         return GetCachedDiagnostics(filePath);
     }
+
+    /// <summary>
+    /// Guards against a publish for the previous revision that was already in flight when the
+    /// cache was cleared. Servers may omit the version, in which case we accept the publish:
+    /// the cache is cleared before each didOpen/didChange, so anything present arrived after it.
+    /// </summary>
+    private static bool IsCurrent(PublishDiagnosticsParams diagnostics, int expectedVersion)
+        => diagnostics.Version is not int version || version >= expectedVersion;
 
     public async Task<Hover?> GetHoverAsync(string filePath, int line, int character, CancellationToken cancellationToken = default)
     {
@@ -383,7 +401,7 @@ public class LspClient : IAsyncDisposable
             Position = new Position { Line = line, Character = character }
         };
 
-        return await SendRequestAsync<Hover>("textDocument/hover", param, cancellationToken);
+        return await SendRequestAsync("textDocument/hover", param, Json.Hover, cancellationToken);
     }
 
     public async Task<CompletionItem[]?> GetCompletionsAsync(string filePath, int line, int character, CancellationToken cancellationToken = default)
@@ -395,15 +413,15 @@ public class LspClient : IAsyncDisposable
             Context = new CompletionContext { TriggerKind = CompletionTriggerKind.Invoked }
         };
 
-        var result = await SendRequestAsync<JsonElement>("textDocument/completion", param, cancellationToken);
+        var result = await SendRequestAsync("textDocument/completion", param, Json.JsonElement, cancellationToken);
         if (result.ValueKind == JsonValueKind.Undefined || result.ValueKind == JsonValueKind.Null)
             return null;
 
         // Response can be CompletionItem[] or CompletionList
         if (result.ValueKind == JsonValueKind.Array)
-            return result.Deserialize<CompletionItem[]>(JsonOptions);
+            return result.Deserialize(Json.CompletionItemArray);
 
-        var list = result.Deserialize<CompletionList>(JsonOptions);
+        var list = result.Deserialize(Json.CompletionList);
         return list?.Items;
     }
 
@@ -415,15 +433,15 @@ public class LspClient : IAsyncDisposable
             Position = new Position { Line = line, Character = character }
         };
 
-        var result = await SendRequestAsync<JsonElement>("textDocument/definition", param, cancellationToken);
+        var result = await SendRequestAsync("textDocument/definition", param, Json.JsonElement, cancellationToken);
         if (result.ValueKind == JsonValueKind.Undefined || result.ValueKind == JsonValueKind.Null)
             return null;
 
         // Response can be Location, Location[], or null
         if (result.ValueKind == JsonValueKind.Array)
-            return result.Deserialize<Location[]>(JsonOptions);
+            return result.Deserialize(Json.LocationArray);
 
-        var single = result.Deserialize<Location>(JsonOptions);
+        var single = result.Deserialize(Json.Location);
         return single != null ? new[] { single } : null;
     }
 
@@ -436,7 +454,7 @@ public class LspClient : IAsyncDisposable
             Context = new ReferenceContext { IncludeDeclaration = includeDeclaration }
         };
 
-        return await SendRequestAsync<Location[]>("textDocument/references", param, cancellationToken);
+        return await SendRequestAsync("textDocument/references", param, Json.LocationArray, cancellationToken);
     }
 
     public async Task<object?> GetDocumentSymbolsAsync(string filePath, CancellationToken cancellationToken = default)
@@ -446,7 +464,7 @@ public class LspClient : IAsyncDisposable
             TextDocument = new TextDocumentIdentifier { Uri = new Uri(filePath).ToString() }
         };
 
-        var result = await SendRequestAsync<JsonElement>("textDocument/documentSymbol", param, cancellationToken);
+        var result = await SendRequestAsync("textDocument/documentSymbol", param, Json.JsonElement, cancellationToken);
         if (result.ValueKind == JsonValueKind.Undefined || result.ValueKind == JsonValueKind.Null)
             return null;
 
@@ -455,9 +473,9 @@ public class LspClient : IAsyncDisposable
         {
             var first = result[0];
             if (first.TryGetProperty("selectionRange", out _))
-                return result.Deserialize<DocumentSymbol[]>(JsonOptions);
+                return result.Deserialize(Json.DocumentSymbolArray);
             else
-                return result.Deserialize<SymbolInformation[]>(JsonOptions);
+                return result.Deserialize(Json.SymbolInformationArray);
         }
 
         return Array.Empty<DocumentSymbol>();
@@ -472,7 +490,7 @@ public class LspClient : IAsyncDisposable
             Context = new CodeActionContext { Diagnostics = diagnostics }
         };
 
-        return await SendRequestAsync<CodeAction[]>("textDocument/codeAction", param, cancellationToken);
+        return await SendRequestAsync("textDocument/codeAction", param, Json.CodeActionArray, cancellationToken);
     }
 
     public async Task<WorkspaceEdit?> RenameSymbolAsync(string filePath, int line, int character, string newName, CancellationToken cancellationToken = default)
@@ -484,10 +502,10 @@ public class LspClient : IAsyncDisposable
             NewName = newName
         };
 
-        return await SendRequestAsync<WorkspaceEdit>("textDocument/rename", param, cancellationToken);
+        return await SendRequestAsync("textDocument/rename", param, Json.WorkspaceEdit, cancellationToken);
     }
 
-    private async Task<T?> SendRequestAsync<T>(string method, object? @params, CancellationToken cancellationToken)
+    private async Task<T?> SendRequestAsync<T>(string method, object? @params, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)
     {
         var id = Interlocked.Increment(ref _requestId);
         var request = new JsonRpcRequest
@@ -503,7 +521,7 @@ public class LspClient : IAsyncDisposable
         try
         {
             _logger.LogDebug("SendRequestAsync: Sending request id={Id} method={Method}", id, method);
-            await SendMessageAsync(request, cancellationToken);
+            await SendMessageAsync(request, Json.JsonRpcRequest, cancellationToken);
             _logger.LogDebug("SendRequestAsync: Request sent, waiting for response...");
 
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -514,7 +532,7 @@ public class LspClient : IAsyncDisposable
             if (result.ValueKind == JsonValueKind.Null || result.ValueKind == JsonValueKind.Undefined)
                 return default;
 
-            return result.Deserialize<T>(JsonOptions);
+            return result.Deserialize(typeInfo);
         }
         finally
         {
@@ -530,15 +548,15 @@ public class LspClient : IAsyncDisposable
             Params = @params
         };
 
-        await SendMessageAsync(notification, cancellationToken);
+        await SendMessageAsync(notification, Json.JsonRpcNotification, cancellationToken);
     }
 
-    private async Task SendMessageAsync(object message, CancellationToken cancellationToken)
+    private async Task SendMessageAsync<T>(T message, JsonTypeInfo<T> typeInfo, CancellationToken cancellationToken)
     {
         if (_lspProcess?.StandardInput?.BaseStream == null)
             throw new InvalidOperationException("LSP client not started");
 
-        var json = JsonSerializer.Serialize(message, JsonOptions);
+        var json = JsonSerializer.Serialize(message, typeInfo);
         // Write bytes directly to avoid encoding issues (BOM, etc.)
         var content = $"Content-Length: {Encoding.UTF8.GetByteCount(json)}\r\n\r\n{json}";
         var bytes = Encoding.UTF8.GetBytes(content);
@@ -643,7 +661,7 @@ public class LspClient : IAsyncDisposable
                 var method = methodElement.GetString();
                 if (method == "textDocument/publishDiagnostics" && root.TryGetProperty("params", out var @params))
                 {
-                    var diagnostics = @params.Deserialize<PublishDiagnosticsParams>(JsonOptions);
+                    var diagnostics = @params.Deserialize(Json.PublishDiagnosticsParams);
                     if (diagnostics != null)
                     {
                         _diagnosticsCache[diagnostics.Uri] = diagnostics;
@@ -767,7 +785,7 @@ public class LspClient : IAsyncDisposable
             try
             {
                 // Send shutdown request
-                await SendRequestAsync<object>("shutdown", null, CancellationToken.None);
+                await SendRequestAsync("shutdown", null, Json.JsonElement, CancellationToken.None);
                 await SendNotificationAsync("exit", null, CancellationToken.None);
 
                 if (!_lspProcess.WaitForExit(3000))
