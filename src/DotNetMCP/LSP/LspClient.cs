@@ -23,11 +23,12 @@ public class LspClient : IAsyncDisposable
     private readonly SemaphoreSlim _writeLock = new(1, 1);
     private string? _filteredWorkspacePath;
 
+    // No JsonStringEnumConverter: every LSP enum is numeric on the wire (triggerKind: 1,
+    // severity: 2, ...). Serializing them as strings makes the server reject the request.
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.CamelCase) }
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
     public event Action<PublishDiagnosticsParams>? DiagnosticsReceived;
