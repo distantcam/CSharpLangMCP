@@ -5,11 +5,36 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+
+    <!-- Publish as one exe. The BuildHost-* folders stay loose beside it: Roslyn starts
+         them as separate processes, so they cannot live inside the bundle. -->
+    <PublishSingleFile>true</PublishSingleFile>
+    <SelfContained>false</SelfContained>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="DotNetMCP.Tests" />
   </ItemGroup>
+
+  <!--
+    Roslyn starts a BuildHost-* payload as its own process, locating it by path next to this
+    assembly. The single-file bundler treats every .dll/.exe it is handed as bundle content, so
+    without this it swallows those payloads and leaves the folders with nothing to run.
+    Runs between _HandleFileConflictsForPublish and _ComputeFilesToBundle, which is where the
+    publish list is final and the bundler has not yet partitioned it.
+  -->
+  <Target Name="KeepBuildHostBesideSingleFile"
+          AfterTargets="_HandleFileConflictsForPublish"
+          Condition="'$(PublishSingleFile)' == 'true'">
+    <ItemGroup>
+      <_BuildHostPublishFile Include="@(ResolvedFileToPublish)"
+                             Condition="$([System.String]::new('%(ResolvedFileToPublish.RelativePath)').StartsWith('BuildHost-'))" />
+      <ResolvedFileToPublish Remove="@(_BuildHostPublishFile)" />
+      <ResolvedFileToPublish Include="@(_BuildHostPublishFile)" ExcludeFromSingleFile="true" />
+    </ItemGroup>
+  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />

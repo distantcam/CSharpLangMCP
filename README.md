@@ -13,10 +13,12 @@ Roslyn evaluates project files through its own out-of-process MSBuild build host
 ## Build
 
 ```bash
-dotnet publish src/DotNetMCP/DotNetMCP.csproj -c Release -o dist
+dotnet publish src/DotNetMCP/DotNetMCP.csproj -c Release -r win-x64 -o dist
 ```
 
-Output: `dist\DotNetMCP.exe` alongside its dependencies.
+Output: `dist\DotNetMCP.exe` — a single-file build with every dependency bundled in — plus the `BuildHost-net472\` and `BuildHost-netcore\` folders. **Those two folders have to travel with the exe.** Roslyn evaluates project files by launching one of them as a separate process, so they cannot live inside the bundle; it looks for them next to the executable.
+
+Single-file publish requires a runtime identifier; swap `win-x64` for `linux-x64` or `osx-arm64` elsewhere. The build stays framework-dependent — the .NET 10 SDK is a runtime prerequisite regardless, so bundling a private runtime would only add ~70 MB.
 
 ## Tests
 
