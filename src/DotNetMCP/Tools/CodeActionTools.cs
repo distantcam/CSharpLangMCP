@@ -1,0 +1,251 @@
+using System.ComponentModel;
+using System.Text;
+using DotNetMCP.Roslyn;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
+using Microsoft.Extensions.Logging;
+using ModelContextProtocol.Server;
+
+namespace DotNetMCP.Tools;
+
+/// <summary>Roslyn's quick fixes and refactorings, listed and applied.</summary>
+[McpServerToolType]
+public sealed class CodeActionTools(
+    ILogger<CodeActionTools> logger,
+    RoslynWorkspaceService workspace,
+    CodeActionService codeActions)
+{
+    [McpServerTool(Name = "csharp_code_actions")]
+    [Description("List the quick fixes and refactorings available at a position or over a line range - the same actions an IDE lightbulb offers. Apply one with csharp_apply_code_action.")]
+    public Task<string> CodeActionsAsync(
+        [Description("Absolute path to the C# file")] string filePath,
+        [Description("0-based start line")] int startLine,
+        [Description("0-based end line. Omit to use just the start line.")] int? endLine = null,
+        [Description("0-based start character. Defaults to the start of the line.")] int? startCharacter = null,
+        [Description("0-based end character. Defaults to the end of the end line.")] int? endCharacter = null,
+        [Description("Include quick fixes for diagnostics (default true)")] bool includeFixes = true,
+        [Description("Include refactorings (default true). These are the slower half of the call.")] bool includeRefactorings = true,
+        [Description("Unsaved file content (reads from disk if omitted)")] string? content = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ToolBase.ExecuteAsync(logger, "csharp_code_actions", async ct =>
+        {
+            var located = await LocateAsync(filePath, startLine, endLine, startCharacter, endCharacter, content, ct);
+            if (located.Error is not null)
+                return located.Error;
+
+            var (document, span, diagnostics) = (located.Document!, located.Span, located.Diagnostics!);
+
+            var actions = await codeActions.GetActionsAsync(
+                document, span, diagnostics, includeFixes, includeRefactorings, ct);
+
+            var text = await document.GetTextAsync(ct);
+            var lines = text.Lines.GetLinePositionSpan(span);
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"{document.FilePath}  lines {lines.Start.Line + 1}-{lines.End.Line + 1}");
+            sb.AppendLine();
+
+            if (actions.Count == 0)
+            {
+                sb.AppendLine("No code actions available here.");
+                if (!includeRefactorings)
+                    sb.AppendLine("Refactorings were excluded - re-run with includeRefactorings=true to see more.");
+                return sb.ToString();
+            }
+
+            sb.AppendLine($"{actions.Count} code action(s). Apply one by passing its exact title to csharp_apply_code_action:");
+
+            foreach (var group in actions.GroupBy(a => a.Kind))
+            {
+                sb.AppendLine();
+                sb.AppendLine(group.Key == CodeActionKind.Fix ? "Quick fixes:" : "Refactorings:");
+
+                foreach (var action in group)
+                {
+                    var origin = action.DiagnosticId is null
+                        ? $"[{action.Provider}]"
+                        : $"[{action.DiagnosticId}, {action.Provider}]";
+
+                    sb.AppendLine($"  - {action.Title}   {origin}");
+                }
+            }
+
+            return sb.ToString();
+        }, cancellationToken);
+    }
+
+    [McpServerTool(Name = "csharp_apply_code_action")]
+    [Description("Apply a code action offered by csharp_code_actions, identified by its exact title. Previews the edits by default; pass apply=true to write them.")]
+    public Task<string> ApplyCodeActionAsync(
+        [Description("Absolute path to the C# file")] string filePath,
+        [Description("Exact title as listed by csharp_code_actions")] string title,
+        [Description("0-based start line - must match the csharp_code_actions call")] int startLine = 0,
+        [Description("0-based end line. Omit to use just the start line.")] int? endLine = null,
+        [Description("0-based start character. Defaults to the start of the line.")] int? startCharacter = null,
+        [Description("0-based end character. Defaults to the end of the end line.")] int? endCharacter = null,
+        [Description("Write the changes to disk. Default false, which only previews them.")] bool apply = false,
+        [Description("Unsaved file content (reads from disk if omitted)")] string? content = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ToolBase.ExecuteAsync(logger, "csharp_apply_code_action", async ct =>
+        {
+            if (string.IsNullOrWhiteSpace(title))
+                return "Error: title must not be empty.";
+
+            var located = await LocateAsync(filePath, startLine, endLine, startCharacter, endCharacter, content, ct);
+            if (located.Error is not null)
+                return located.Error;
+
+            var (document, span, diagnostics) = (located.Document!, located.Span, located.Diagnostics!);
+
+            var actions = await codeActions.GetActionsAsync(
+                document, span, diagnostics, includeFixes: true, includeRefactorings: true, ct);
+
+            var chosen = actions.FirstOrDefault(a => string.Equals(a.Title, title, StringComparison.Ordinal))
+                ?? actions.FirstOrDefault(a => string.Equals(a.Title, title, StringComparison.OrdinalIgnoreCase));
+
+            if (chosen is null)
+            {
+                var sb = new StringBuilder();
+                sb.AppendLine($"No code action titled '{title}' is available at this location.");
+
+                if (actions.Count > 0)
+                {
+                    sb.AppendLine();
+                    sb.AppendLine("Available here:");
+                    foreach (var action in actions)
+                        sb.AppendLine($"  - {action.Title}");
+                }
+
+                return sb.ToString();
+            }
+
+            var changed = await CodeActionService.GetChangedSolutionAsync(chosen.Action, ct);
+            if (changed is null)
+                return $"'{chosen.Title}' produced no file edits - it is not something this server can apply.";
+
+            var sb2 = new StringBuilder();
+            sb2.AppendLine($"{chosen.Title}");
+            sb2.AppendLine();
+
+            var edits = 0;
+            var files = 0;
+
+            foreach (var projectChange in changed.GetChanges(document.Project.Solution).GetProjectChanges())
+            {
+                foreach (var documentId in projectChange.GetChangedDocuments())
+                {
+                    var original = document.Project.Solution.GetDocument(documentId);
+                    var updated = changed.GetDocument(documentId);
+                    if (original is null || updated is null)
+                        continue;
+
+                    var textChanges = (await updated.GetTextChangesAsync(original, ct)).ToArray();
+                    if (textChanges.Length == 0)
+                        continue;
+
+                    files++;
+                    edits += textChanges.Length;
+
+                    sb2.AppendLine($"{original.FilePath ?? original.Name}: {textChanges.Length} edit(s)");
+
+                    var originalText = await original.GetTextAsync(ct);
+                    foreach (var change in textChanges.Take(20))
+                    {
+                        var position = originalText.Lines.GetLinePosition(change.Span.Start);
+                        var replaced = originalText.ToString(change.Span).ReplaceLineEndings(" ").Trim();
+                        var inserted = (change.NewText ?? "").ReplaceLineEndings(" ").Trim();
+
+                        sb2.AppendLine($"  line {position.Line + 1}: {Describe(replaced, inserted)}");
+                    }
+
+                    if (textChanges.Length > 20)
+                        sb2.AppendLine($"  ... and {textChanges.Length - 20} more in this file");
+                }
+            }
+
+            if (edits == 0)
+                return sb2.Append("No edits were produced.").ToString();
+
+            sb2.AppendLine();
+            sb2.AppendLine($"Total: {edits} edit(s) across {files} file(s).");
+
+            if (!apply)
+            {
+                sb2.AppendLine("Nothing was written. Re-run with apply=true to make these changes.");
+                return sb2.ToString();
+            }
+
+            if (!workspace.TryApplyChanges(changed))
+                return sb2.Append("Error: The workspace refused the changes; nothing was written.").ToString();
+
+            sb2.AppendLine("Applied - the files above have been written to disk.");
+            return sb2.ToString();
+        }, cancellationToken);
+    }
+
+    private sealed record Located(
+        string? Error,
+        Document? Document,
+        TextSpan Span,
+        IReadOnlyList<Diagnostic>? Diagnostics);
+
+    /// <summary>
+    /// Resolves the file and line range to a document, a span, and the diagnostics on that document.
+    /// </summary>
+    /// <remarks>
+    /// Diagnostics are computed fresh rather than read from a cache: a fix offered against a stale
+    /// diagnostic either fails to apply or silently does the wrong thing.
+    /// </remarks>
+    private async Task<Located> LocateAsync(
+        string filePath, int startLine, int? endLine, int? startCharacter, int? endCharacter,
+        string? content, CancellationToken ct)
+    {
+        var full = Path.GetFullPath(filePath);
+        if (content is not null)
+            workspace.SetOverlay(full, content);
+
+        var solution = await workspace.GetSolutionAsync(full, ct);
+
+        var document = RoslynWorkspaceService.FindDocument(solution, full);
+        if (document is null)
+            return new Located($"Error: File is not part of the loaded workspace: {full}", null, default, null);
+
+        var text = await document.GetTextAsync(ct);
+        var lastLine = endLine ?? startLine;
+
+        if (!SymbolResolver.TryGetPosition(text, startLine, startCharacter ?? 0, out var start, out var startError))
+            return new Located($"Error: {startError}", null, default, null);
+
+        int end;
+        if (endCharacter is { } explicitEnd)
+        {
+            if (!SymbolResolver.TryGetPosition(text, lastLine, explicitEnd, out end, out var endError))
+                return new Located($"Error: {endError}", null, default, null);
+        }
+        else
+        {
+            if (lastLine >= text.Lines.Count)
+                return new Located($"Error: Line {lastLine + 1} is past the end of the file ({text.Lines.Count} line(s)).", null, default, null);
+
+            end = text.Lines[lastLine].End;
+        }
+
+        if (end < start)
+            return new Located("Error: The end of the range is before its start.", null, default, null);
+
+        var model = await document.GetSemanticModelAsync(ct);
+        if (model is null)
+            return new Located($"Error: Could not build a semantic model for {full}", null, default, null);
+
+        return new Located(null, document, TextSpan.FromBounds(start, end), model.GetDiagnostics(cancellationToken: ct));
+    }
+
+    private static string Describe(string replaced, string inserted) => (replaced, inserted) switch
+    {
+        ("", var to) => $"insert \"{SymbolFormatter.Truncate(to, 120)}\"",
+        (var from, "") => $"remove \"{SymbolFormatter.Truncate(from, 120)}\"",
+        var (from, to) => $"\"{SymbolFormatter.Truncate(from, 80)}\" -> \"{SymbolFormatter.Truncate(to, 80)}\"",
+    };
+}

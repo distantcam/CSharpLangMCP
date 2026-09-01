@@ -24,6 +24,9 @@ try
     // One workspace shared by every tool; tool instances themselves are per-invocation.
     builder.Services.AddSingleton<RoslynWorkspaceService>();
 
+    // Composing the Roslyn provider catalog is expensive, so it is shared and built lazily.
+    builder.Services.AddSingleton<CodeActionService>();
+
     builder.Services
         .AddMcpServer(options =>
         {
@@ -37,7 +40,8 @@ try
         .WithTools<WorkspaceTools>()
         .WithTools<NavigationTools>()
         .WithTools<StructureTools>()
-        .WithTools<EditTools>();
+        .WithTools<EditTools>()
+        .WithTools<CodeActionTools>();
 
     var app = builder.Build();
     await app.RunAsync();

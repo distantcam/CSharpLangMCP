@@ -100,9 +100,20 @@ If a name matches several symbols, the tool returns the candidates with their id
 | `csharp_outline` | The declarations in a file as a nested outline. |
 | `csharp_type_members` | Members of any type, including ones from referenced assemblies such as the BCL or a NuGet package. |
 
+### Code actions
+
+| Tool | Purpose |
+|---|---|
+| `csharp_code_actions` | List the quick fixes and refactorings available at a position or line range — the same set an IDE lightbulb offers. |
+| `csharp_apply_code_action` | Apply one of them by its exact title. |
+
+Grouped actions are flattened, so a group appears as its individually applicable children (`Generate type 'List' > Generate class 'List'`). Titles are unique within a call and are the handle you pass to `csharp_apply_code_action`.
+
+Refactorings are the slower half — every provider has to be asked. Pass `includeRefactorings=false` for a fixes-only call.
+
 ### Editing
 
-Both editing tools **preview by default** and write only when passed `apply=true`.
+The editing and code action tools **preview by default** and write only when passed `apply=true`.
 
 | Tool | Purpose |
 |---|---|
