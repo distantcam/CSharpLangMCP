@@ -83,7 +83,9 @@ If a name matches several symbols, the tool returns the candidates with their id
 
 | Tool | Purpose |
 |---|---|
-| `csharp_diagnostics` | Compiler errors and warnings. `scope` is `solution`, a project name, or a `.cs` file path. Each result includes the offending source line. |
+| `csharp_diagnostics` | Compiler errors and warnings. `scope` is `solution`, a project name, or a `.cs` file path. Each result includes the offending source line. Pass `includeAnalyzers=true` to also run the project's analyzers. |
+
+By default this is the compiler alone, which is fast but is **not** what `dotnet build` reports: a project with `AnalysisMode` or `EnforceCodeStyleInBuild` set fails its build on `CAxxxx` and `IDExxxx` rules that no compiler diagnostic covers. `includeAnalyzers=true` runs the analyzers the project actually configures, read from the project file by MSBuild — no build, no external process. Severities come out as the build reports them, so a project setting `TreatWarningsAsErrors` gets analyzer *errors*, not warnings.
 
 ### Navigation
 
@@ -113,6 +115,8 @@ Grouped actions are flattened, so a group appears as its individually applicable
 
 Refactorings are the slower half — every provider has to be asked. Pass `includeRefactorings=false` for a fixes-only call.
 
+`includeAnalyzers=true` also considers the file's analyzer diagnostics, which is what makes the `IDExxxx` fixes — add braces, use expression body, remove unnecessary usings — available at all. Pass the same value to `csharp_apply_code_action`. `CAxxxx` diagnostics are reported by `csharp_diagnostics`, but their fixers ship in the NetAnalyzers package rather than the Roslyn Features assemblies this server composes, so no fix is offered for them.
+
 ### Editing
 
 The editing and code action tools **preview by default** and write only when passed `apply=true`.
@@ -127,6 +131,7 @@ The editing and code action tools **preview by default** and write only when pas
 - **Cold start.** The first workspace load takes a few seconds on a small solution and considerably longer on a large one. It happens on the first tool call if you did not call `csharp_load_workspace` yourself.
 - **Memory.** A large solution can hold well over a gigabyte. `csharp_unload_workspace` releases it.
 - **Staleness.** Files edited on disk are picked up automatically on the next tool call. Changes to *project* files are not — reload the workspace with `csharp_load_workspace`.
+- **Analyzer cost.** `includeAnalyzers=true` is off by default because it is not free: a file-scoped call is scoped to that one syntax tree, but a solution-scoped run asks all ~400 analyzers about every project. On this repository that is about a second; on a large solution it is the difference between a quick answer and a slow one, so name a project rather than `solution` where you can.
 - **Unsaved buffers.** Tools that take a `content` argument analyze that text instead of what is on disk.
 
 ## Troubleshooting

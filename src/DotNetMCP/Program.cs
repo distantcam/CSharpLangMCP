@@ -27,6 +27,9 @@ try
     // Composing the Roslyn provider catalog is expensive, so it is shared and built lazily.
     builder.Services.AddSingleton<CodeActionService>();
 
+    // Loading a project's analyzer assemblies is likewise expensive, and cached per project.
+    builder.Services.AddSingleton<AnalyzerService>();
+
     builder.Services
         .AddMcpServer(options =>
         {

@@ -10,7 +10,10 @@ namespace DotNetMCP.Tools;
 
 /// <summary>Workspace lifecycle and diagnostics.</summary>
 [McpServerToolType]
-public sealed class WorkspaceTools(ILogger<WorkspaceTools> logger, RoslynWorkspaceService workspace)
+public sealed class WorkspaceTools(
+    ILogger<WorkspaceTools> logger,
+    RoslynWorkspaceService workspace,
+    AnalyzerService analyzers)
 {
     [McpServerTool(Name = "csharp_load_workspace")]
     [Description("Load a C# solution or project for analysis. Accepts a directory, or a path to a .slnx, .sln, .slnf or .csproj file. Other tools load this automatically if they can find a workspace, but calling this first is faster and reports load problems.")]
@@ -67,10 +70,11 @@ public sealed class WorkspaceTools(ILogger<WorkspaceTools> logger, RoslynWorkspa
     }
 
     [McpServerTool(Name = "csharp_diagnostics")]
-    [Description("Get compiler errors and warnings. Scope can be 'solution', a project name, or an absolute path to a .cs file. Each diagnostic includes the offending source line.")]
+    [Description("Get compiler errors and warnings. Scope can be 'solution', a project name, or an absolute path to a .cs file. Each diagnostic includes the offending source line. Pass includeAnalyzers=true to also run the project's analyzers and match what a build reports.")]
     public Task<string> GetDiagnosticsAsync(
         [Description("'solution', a project name, or an absolute path to a .cs file")] string scope = "solution",
         [Description("Lowest severity to report: Error, Warning, Info or Hidden. Default Warning.")] string minimumSeverity = "Warning",
+        [Description("Also run the project's configured analyzers (CAxxxx, IDExxxx), so the result matches what a build reports rather than the compiler alone. Off by default because it costs real time on a large solution; prefer naming a project over 'solution'. A project setting TreatWarningsAsErrors reports analyzer warnings as errors here, exactly as its build does.")] bool includeAnalyzers = false,
         [Description("Unsaved file content, used only when scope is a file path")] string? content = null,
         [Description("Maximum diagnostics to return (default 100)")] int maxResults = 100,
         CancellationToken cancellationToken = default)
@@ -86,7 +90,7 @@ public sealed class WorkspaceTools(ILogger<WorkspaceTools> logger, RoslynWorkspa
 
             var solution = await workspace.GetSolutionAsync(isFile ? scope : null, ct);
 
-            var (diagnostics, description) = await CollectAsync(solution, scope, isFile, ct);
+            var (diagnostics, description) = await CollectAsync(solution, scope, isFile, includeAnalyzers, ct);
             if (diagnostics is null)
                 return description;
 
@@ -98,11 +102,20 @@ public sealed class WorkspaceTools(ILogger<WorkspaceTools> logger, RoslynWorkspa
                 .ToArray();
 
             if (filtered.Length == 0)
-                return $"No diagnostics at or above {floor} in {description}.";
+            {
+                return includeAnalyzers
+                    ? $"No diagnostics at or above {floor} in {description}."
+                    : $"No compiler diagnostics at or above {floor} in {description}. Analyzers were not run; pass includeAnalyzers=true to match what a build reports.";
+            }
 
             var errors = filtered.Count(d => d.Severity == DiagnosticSeverity.Error);
             var sb = new StringBuilder();
             sb.AppendLine($"{filtered.Length} diagnostic(s) in {description} ({errors} error(s)):");
+
+            // Worth saying out loud: a clean compiler-only result is not the same as a clean build.
+            if (!includeAnalyzers)
+                sb.AppendLine("Compiler diagnostics only - pass includeAnalyzers=true to also run the project's analyzers.");
+
             sb.AppendLine();
 
             var textCache = new Dictionary<string, SourceText?>(RoslynWorkspaceService.PathComparer);
@@ -120,8 +133,12 @@ public sealed class WorkspaceTools(ILogger<WorkspaceTools> logger, RoslynWorkspa
     }
 
     /// <summary>Gathers diagnostics for a solution, a named project, or a single file.</summary>
-    private static async Task<(IReadOnlyList<Diagnostic>? Diagnostics, string Description)> CollectAsync(
-        Solution solution, string scope, bool isFile, CancellationToken ct)
+    /// <remarks>
+    /// Analyzer results are additive: <see cref="AnalyzerService"/> returns analyzer diagnostics
+    /// alone, so they concatenate with the compiler's without duplicating anything.
+    /// </remarks>
+    private async Task<(IReadOnlyList<Diagnostic>? Diagnostics, string Description)> CollectAsync(
+        Solution solution, string scope, bool isFile, bool includeAnalyzers, CancellationToken ct)
     {
         if (isFile)
         {
@@ -134,7 +151,12 @@ public sealed class WorkspaceTools(ILogger<WorkspaceTools> logger, RoslynWorkspa
                 return (null, $"Error: Could not build a semantic model for {scope}");
 
             // Syntax plus declaration plus method-body diagnostics for this tree only.
-            return (model.GetDiagnostics(cancellationToken: ct), Path.GetFileName(document.FilePath ?? scope));
+            var fileDiagnostics = new List<Diagnostic>(model.GetDiagnostics(cancellationToken: ct));
+
+            if (includeAnalyzers)
+                fileDiagnostics.AddRange(await analyzers.GetFileDiagnosticsAsync(document, ct));
+
+            return (fileDiagnostics, Path.GetFileName(document.FilePath ?? scope));
         }
 
         var isSolution = scope.Equals("solution", StringComparison.OrdinalIgnoreCase);
@@ -157,6 +179,9 @@ public sealed class WorkspaceTools(ILogger<WorkspaceTools> logger, RoslynWorkspa
             var compilation = await project.GetCompilationAsync(ct);
             if (compilation is not null)
                 all.AddRange(compilation.GetDiagnostics(ct));
+
+            if (includeAnalyzers)
+                all.AddRange(await analyzers.GetProjectDiagnosticsAsync(project, ct));
         }
 
         return (all, isSolution ? "the solution" : $"project {scope}");

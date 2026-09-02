@@ -13,7 +13,8 @@ namespace DotNetMCP.Tools;
 public sealed class CodeActionTools(
     ILogger<CodeActionTools> logger,
     RoslynWorkspaceService workspace,
-    CodeActionService codeActions)
+    CodeActionService codeActions,
+    AnalyzerService analyzers)
 {
     [McpServerTool(Name = "csharp_code_actions")]
     [Description("List the quick fixes and refactorings available at a position or over a line range - the same actions an IDE lightbulb offers. Apply one with csharp_apply_code_action.")]
@@ -25,12 +26,13 @@ public sealed class CodeActionTools(
         [Description("0-based end character. Defaults to the end of the end line.")] int? endCharacter = null,
         [Description("Include quick fixes for diagnostics (default true)")] bool includeFixes = true,
         [Description("Include refactorings (default true). These are the slower half of the call.")] bool includeRefactorings = true,
+        [Description("Also consider the project's analyzer diagnostics, which is what makes the IDExxxx fixes (add braces, use expression body, remove unnecessary usings) available. Off by default because running the analyzers costs a second or two. CAxxxx diagnostics are reported by csharp_diagnostics but their fixers are not bundled, so no fix appears for them here.")] bool includeAnalyzers = false,
         [Description("Unsaved file content (reads from disk if omitted)")] string? content = null,
         CancellationToken cancellationToken = default)
     {
         return ToolBase.ExecuteAsync(logger, "csharp_code_actions", async ct =>
         {
-            var located = await LocateAsync(filePath, startLine, endLine, startCharacter, endCharacter, content, ct);
+            var located = await LocateAsync(filePath, startLine, endLine, startCharacter, endCharacter, includeAnalyzers, content, ct);
             if (located.Error is not null)
                 return located.Error;
 
@@ -51,6 +53,8 @@ public sealed class CodeActionTools(
                 sb.AppendLine("No code actions available here.");
                 if (!includeRefactorings)
                     sb.AppendLine("Refactorings were excluded - re-run with includeRefactorings=true to see more.");
+                if (!includeAnalyzers)
+                    sb.AppendLine("Analyzer diagnostics were not considered - re-run with includeAnalyzers=true to see their fixes.");
                 return sb.ToString();
             }
 
@@ -85,6 +89,7 @@ public sealed class CodeActionTools(
         [Description("0-based start character. Defaults to the start of the line.")] int? startCharacter = null,
         [Description("0-based end character. Defaults to the end of the end line.")] int? endCharacter = null,
         [Description("Write the changes to disk. Default false, which only previews them.")] bool apply = false,
+        [Description("Must match the csharp_code_actions call. Required to apply a fix for an analyzer diagnostic (CAxxxx, IDExxxx).")] bool includeAnalyzers = false,
         [Description("Unsaved file content (reads from disk if omitted)")] string? content = null,
         CancellationToken cancellationToken = default)
     {
@@ -93,7 +98,7 @@ public sealed class CodeActionTools(
             if (string.IsNullOrWhiteSpace(title))
                 return "Error: title must not be empty.";
 
-            var located = await LocateAsync(filePath, startLine, endLine, startCharacter, endCharacter, content, ct);
+            var located = await LocateAsync(filePath, startLine, endLine, startCharacter, endCharacter, includeAnalyzers, content, ct);
             if (located.Error is not null)
                 return located.Error;
 
@@ -200,7 +205,7 @@ public sealed class CodeActionTools(
     /// </remarks>
     private async Task<Located> LocateAsync(
         string filePath, int startLine, int? endLine, int? startCharacter, int? endCharacter,
-        string? content, CancellationToken ct)
+        bool includeAnalyzers, string? content, CancellationToken ct)
     {
         var full = Path.GetFullPath(filePath);
         if (content is not null)
@@ -239,7 +244,14 @@ public sealed class CodeActionTools(
         if (model is null)
             return new Located($"Error: Could not build a semantic model for {full}", null, default, null);
 
-        return new Located(null, document, TextSpan.FromBounds(start, end), model.GetDiagnostics(cancellationToken: ct));
+        var diagnostics = new List<Diagnostic>(model.GetDiagnostics(cancellationToken: ct));
+
+        // Without these, no CA or IDE diagnostic is ever fixable here, so the whole analyzer half of
+        // the lightbulb - "remove unnecessary usings", "make field readonly" - stays out of reach.
+        if (includeAnalyzers)
+            diagnostics.AddRange(await analyzers.GetFileDiagnosticsAsync(document, ct));
+
+        return new Located(null, document, TextSpan.FromBounds(start, end), diagnostics);
     }
 
     private static string Describe(string replaced, string inserted) => (replaced, inserted) switch
