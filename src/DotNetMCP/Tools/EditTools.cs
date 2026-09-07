@@ -31,19 +31,13 @@ public sealed class EditTools(ILogger<EditTools> logger, RoslynWorkspaceService 
             if (string.IsNullOrWhiteSpace(newName))
                 return "Error: newName must not be empty.";
 
-            if (string.IsNullOrWhiteSpace(symbol) && string.IsNullOrWhiteSpace(filePath))
-                return "Error: Provide either a symbol id or name, or a filePath with line and character.";
+            var resolved = await SymbolResolver.ResolveArgumentsAsync(
+                workspace, symbol, filePath, line, character, content: null, ct);
 
-            var solution = await workspace.GetSolutionAsync(filePath, ct);
-
-            var lookup = string.IsNullOrWhiteSpace(symbol)
-                ? await SymbolResolver.ResolveAtPositionAsync(solution, filePath!, line, character, ct)
-                : await SymbolResolver.ResolveAsync(solution, symbol, ct);
-
-            if (SymbolFormatter.FormatFailure(lookup) is { } failure)
+            if (resolved.Error is { } failure)
                 return failure;
 
-            var target = ((SymbolLookup.Found)lookup).Symbol;
+            var (target, solution) = (resolved.Symbol!, resolved.Solution!);
 
             if (!target.Locations.Any(l => l.IsInSource))
                 return $"Error: {target.ToDisplayString(SymbolFormatter.Signature)} is defined in metadata and cannot be renamed.";
@@ -60,57 +54,9 @@ public sealed class EditTools(ILogger<EditTools> logger, RoslynWorkspaceService 
             sb.AppendLine($"Rename {target.ToDisplayString(SymbolFormatter.Signature)} to '{newName}'");
             sb.AppendLine();
 
-            var totalEdits = 0;
-            var changedFiles = 0;
-
-            foreach (var projectChange in renamed.GetChanges(solution).GetProjectChanges())
-            {
-                foreach (var documentId in projectChange.GetChangedDocuments())
-                {
-                    var original = solution.GetDocument(documentId);
-                    var updated = renamed.GetDocument(documentId);
-                    if (original is null || updated is null)
-                        continue;
-
-                    var changes = (await updated.GetTextChangesAsync(original, ct)).ToArray();
-                    if (changes.Length == 0)
-                        continue;
-
-                    changedFiles++;
-                    totalEdits += changes.Length;
-
-                    sb.AppendLine($"{original.FilePath ?? original.Name}: {changes.Length} edit(s)");
-
-                    var text = await original.GetTextAsync(ct);
-                    foreach (var change in changes.Take(20))
-                    {
-                        var position = text.Lines.GetLinePosition(change.Span.Start);
-                        var before = text.Lines[position.Line].ToString().Trim();
-                        sb.AppendLine($"  {position.Line + 1}: {SymbolFormatter.Truncate(before, 160)}");
-                    }
-
-                    if (changes.Length > 20)
-                        sb.AppendLine($"  ... and {changes.Length - 20} more in this file");
-                }
-            }
-
-            if (totalEdits == 0)
-                return sb.Append("No edits required - nothing references this symbol under that name.").ToString();
-
-            sb.AppendLine();
-            sb.AppendLine($"Total: {totalEdits} edit(s) across {changedFiles} file(s).");
-
-            if (!apply)
-            {
-                sb.AppendLine("Nothing was written. Re-run with apply=true to make these changes.");
-                return sb.ToString();
-            }
-
-            if (!workspace.TryApplyChanges(renamed))
-                return sb.Append("\nError: The workspace refused the changes; nothing was written.").ToString();
-
-            sb.AppendLine("Applied - the files above have been written to disk.");
-            return sb.ToString();
+            return await ChangePreview.RenderAsync(
+                sb, workspace, solution, renamed, apply, DescribeRenamedLine, ct,
+                noEdits: "No edits required - nothing references this symbol under that name.");
         }, cancellationToken);
     }
 
@@ -133,52 +79,34 @@ public sealed class EditTools(ILogger<EditTools> logger, RoslynWorkspaceService 
             var options = await document.GetOptionsAsync(ct);
             var formatted = await Formatter.FormatAsync(document, options, ct);
 
-            var changes = (await formatted.GetTextChangesAsync(document, ct)).ToArray();
-            if (changes.Length == 0)
-                return $"{full} is already correctly formatted.";
-
-            var sb = new StringBuilder();
-            sb.AppendLine($"{full}: {changes.Length} formatting change(s)");
-            sb.AppendLine();
-
-            var text = await document.GetTextAsync(ct);
-            foreach (var change in changes.Take(30))
-            {
-                var position = text.Lines.GetLinePosition(change.Span.Start);
-                sb.AppendLine($"  line {position.Line + 1}: {DescribeChange(text, change)}");
-            }
-
-            if (changes.Length > 30)
-                sb.AppendLine($"  ... and {changes.Length - 30} more");
-
-            sb.AppendLine();
-
-            if (!apply)
-            {
-                sb.AppendLine("Nothing was written. Re-run with apply=true to format the file.");
-                return sb.ToString();
-            }
-
-            if (!workspace.TryApplyChanges(formatted.Project.Solution))
-                return sb.Append("Error: The workspace refused the changes; nothing was written.").ToString();
-
-            sb.AppendLine("Applied - the file has been written to disk.");
-            return sb.ToString();
+            return await ChangePreview.RenderAsync(
+                new StringBuilder(), workspace, solution, formatted.Project.Solution, apply,
+                DescribeWhitespaceChange, ct,
+                noEdits: $"{full} is already correctly formatted.");
         }, cancellationToken);
     }
 
-    /// <summary>Renders a whitespace-only edit readably, since the raw text is invisible.</summary>
-    private static string DescribeChange(SourceText text, TextChange change)
+    /// <summary>A rename edit reads best as the line it lands on, before the change.</summary>
+    private static string DescribeRenamedLine(SourceText text, TextChange change)
     {
-        var removed = text.ToString(change.Span);
-        var added = change.NewText ?? "";
+        var line = ChangePreview.LineOf(text, change);
+        return $"{line}: {SymbolFormatter.Truncate(text.Lines[line - 1].ToString().Trim(), 160)}";
+    }
 
-        return (Visible(removed), Visible(added)) switch
+    /// <summary>Renders a whitespace-only edit readably, since the raw text is invisible.</summary>
+    private static string DescribeWhitespaceChange(SourceText text, TextChange change)
+    {
+        var removed = Visible(text.ToString(change.Span));
+        var added = Visible(change.NewText ?? "");
+
+        var described = (removed, added) switch
         {
             ("", var to) => $"insert {to}",
             (var from, "") => $"remove {from}",
             var (from, to) => $"{from} -> {to}",
         };
+
+        return $"line {ChangePreview.LineOf(text, change)}: {described}";
 
         static string Visible(string value) =>
             value.Replace("\r\n", "\\n", StringComparison.Ordinal)

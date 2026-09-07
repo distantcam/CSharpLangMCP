@@ -134,59 +134,8 @@ public sealed class CodeActionTools(
             sb2.AppendLine($"{chosen.Title}");
             sb2.AppendLine();
 
-            var edits = 0;
-            var files = 0;
-
-            foreach (var projectChange in changed.GetChanges(document.Project.Solution).GetProjectChanges())
-            {
-                foreach (var documentId in projectChange.GetChangedDocuments())
-                {
-                    var original = document.Project.Solution.GetDocument(documentId);
-                    var updated = changed.GetDocument(documentId);
-                    if (original is null || updated is null)
-                        continue;
-
-                    var textChanges = (await updated.GetTextChangesAsync(original, ct)).ToArray();
-                    if (textChanges.Length == 0)
-                        continue;
-
-                    files++;
-                    edits += textChanges.Length;
-
-                    sb2.AppendLine($"{original.FilePath ?? original.Name}: {textChanges.Length} edit(s)");
-
-                    var originalText = await original.GetTextAsync(ct);
-                    foreach (var change in textChanges.Take(20))
-                    {
-                        var position = originalText.Lines.GetLinePosition(change.Span.Start);
-                        var replaced = originalText.ToString(change.Span).ReplaceLineEndings(" ").Trim();
-                        var inserted = (change.NewText ?? "").ReplaceLineEndings(" ").Trim();
-
-                        sb2.AppendLine($"  line {position.Line + 1}: {Describe(replaced, inserted)}");
-                    }
-
-                    if (textChanges.Length > 20)
-                        sb2.AppendLine($"  ... and {textChanges.Length - 20} more in this file");
-                }
-            }
-
-            if (edits == 0)
-                return sb2.Append("No edits were produced.").ToString();
-
-            sb2.AppendLine();
-            sb2.AppendLine($"Total: {edits} edit(s) across {files} file(s).");
-
-            if (!apply)
-            {
-                sb2.AppendLine("Nothing was written. Re-run with apply=true to make these changes.");
-                return sb2.ToString();
-            }
-
-            if (!workspace.TryApplyChanges(changed))
-                return sb2.Append("Error: The workspace refused the changes; nothing was written.").ToString();
-
-            sb2.AppendLine("Applied - the files above have been written to disk.");
-            return sb2.ToString();
+            return await ChangePreview.RenderAsync(
+                sb2, workspace, document.Project.Solution, changed, apply, DescribeEdit, ct);
         }, cancellationToken);
     }
 
@@ -254,10 +203,18 @@ public sealed class CodeActionTools(
         return new Located(null, document, TextSpan.FromBounds(start, end), diagnostics);
     }
 
-    private static string Describe(string replaced, string inserted) => (replaced, inserted) switch
+    private static string DescribeEdit(SourceText text, TextChange change)
     {
-        ("", var to) => $"insert \"{SymbolFormatter.Truncate(to, 120)}\"",
-        (var from, "") => $"remove \"{SymbolFormatter.Truncate(from, 120)}\"",
-        var (from, to) => $"\"{SymbolFormatter.Truncate(from, 80)}\" -> \"{SymbolFormatter.Truncate(to, 80)}\"",
-    };
+        var replaced = text.ToString(change.Span).ReplaceLineEndings(" ").Trim();
+        var inserted = (change.NewText ?? "").ReplaceLineEndings(" ").Trim();
+
+        var described = (replaced, inserted) switch
+        {
+            ("", var to) => $"insert \"{SymbolFormatter.Truncate(to, 120)}\"",
+            (var from, "") => $"remove \"{SymbolFormatter.Truncate(from, 120)}\"",
+            var (from, to) => $"\"{SymbolFormatter.Truncate(from, 80)}\" -> \"{SymbolFormatter.Truncate(to, 80)}\"",
+        };
+
+        return $"line {ChangePreview.LineOf(text, change)}: {described}";
+    }
 }

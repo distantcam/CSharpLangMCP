@@ -148,13 +148,9 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
                 return byMetadataName;
         }
 
-        var lookup = await SymbolResolver.ResolveAsync(solution, typeName, ct);
-        return lookup switch
-        {
-            SymbolLookup.Found { Symbol: INamedTypeSymbol found } => found,
-            SymbolLookup.Ambiguous ambiguous => ambiguous.Candidates.OfType<INamedTypeSymbol>().FirstOrDefault(),
-            _ => null,
-        };
+        // Ambiguity is not interesting here: any type answering to the name will do.
+        var candidates = await SymbolResolver.FindByNameAsync(solution, typeName, ct);
+        return candidates.OfType<INamedTypeSymbol>().FirstOrDefault();
     }
 
     /// <summary>Walks declaration syntax, writing one indented line per member. Returns true if anything was written.</summary>

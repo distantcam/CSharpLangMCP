@@ -10,10 +10,11 @@ public class SymbolResolverTests
     {
         var (_, solution) = await WorkspaceFixture.GetAsync();
 
-        var lookup = await SymbolResolver.ResolveAsync(solution, "RoslynWorkspaceService", CancellationToken.None);
+        var (symbol, error) = await SymbolResolver.ResolveAsync(
+            solution, "RoslynWorkspaceService", CancellationToken.None);
 
-        await Assert.That(lookup).IsTypeOf<SymbolLookup.Found>();
-        await Assert.That(((SymbolLookup.Found)lookup).Symbol.Name).IsEqualTo("RoslynWorkspaceService");
+        await Assert.That(error).IsNull();
+        await Assert.That(symbol!.Name).IsEqualTo("RoslynWorkspaceService");
     }
 
     [Test]
@@ -21,13 +22,11 @@ public class SymbolResolverTests
     {
         var (_, solution) = await WorkspaceFixture.GetAsync();
 
-        var lookup = await SymbolResolver.ResolveAsync(
+        var (symbol, error) = await SymbolResolver.ResolveAsync(
             solution, "SymbolResolver.ResolveAtPositionAsync", CancellationToken.None);
 
-        await Assert.That(lookup).IsTypeOf<SymbolLookup.Found>();
-
-        var symbol = ((SymbolLookup.Found)lookup).Symbol;
-        await Assert.That(symbol.ContainingType.Name).IsEqualTo("SymbolResolver");
+        await Assert.That(error).IsNull();
+        await Assert.That(symbol!.ContainingType.Name).IsEqualTo("SymbolResolver");
         await Assert.That(symbol.Name).IsEqualTo("ResolveAtPositionAsync");
     }
 
@@ -36,17 +35,15 @@ public class SymbolResolverTests
     {
         var (_, solution) = await WorkspaceFixture.GetAsync();
 
-        var first = await SymbolResolver.ResolveAsync(solution, "SymbolFormatter.Truncate", CancellationToken.None);
-        await Assert.That(first).IsTypeOf<SymbolLookup.Found>();
+        var (original, error) = await SymbolResolver.ResolveAsync(
+            solution, "SymbolFormatter.Truncate", CancellationToken.None);
+        await Assert.That(error).IsNull();
 
-        var original = ((SymbolLookup.Found)first).Symbol;
-        var id = SymbolResolver.IdFor(original);
+        var id = SymbolResolver.IdFor(original!);
         await Assert.That(id).IsNotNull();
 
-        var second = await SymbolResolver.ResolveAsync(solution, id!, CancellationToken.None);
-        await Assert.That(second).IsTypeOf<SymbolLookup.Found>();
-
-        var resolved = ((SymbolLookup.Found)second).Symbol;
+        var (resolved, roundTripError) = await SymbolResolver.ResolveAsync(solution, id!, CancellationToken.None);
+        await Assert.That(roundTripError).IsNull();
         await Assert.That(SymbolEqualityComparer.Default.Equals(original, resolved)).IsTrue();
     }
 
@@ -55,11 +52,12 @@ public class SymbolResolverTests
     {
         var (_, solution) = await WorkspaceFixture.GetAsync();
 
-        // Several tool classes declare a private ResolveAsync alongside SymbolResolver's public one.
-        var lookup = await SymbolResolver.ResolveAsync(solution, "ResolveAsync", CancellationToken.None);
+        // NavigationTools and WorkspaceTools each declare their own TextForAsync.
+        var (symbol, error) = await SymbolResolver.ResolveAsync(solution, "TextForAsync", CancellationToken.None);
 
-        await Assert.That(lookup).IsTypeOf<SymbolLookup.Ambiguous>();
-        await Assert.That(((SymbolLookup.Ambiguous)lookup).Candidates.Count).IsGreaterThan(1);
+        await Assert.That(symbol).IsNull();
+        await Assert.That(error).Contains("ambiguous");
+        await Assert.That(error).Contains("id: ");
     }
 
     [Test]
@@ -67,10 +65,11 @@ public class SymbolResolverTests
     {
         var (_, solution) = await WorkspaceFixture.GetAsync();
 
-        var lookup = await SymbolResolver.ResolveAsync(solution, "NoSuchSymbolAnywhere", CancellationToken.None);
+        var (symbol, error) = await SymbolResolver.ResolveAsync(
+            solution, "NoSuchSymbolAnywhere", CancellationToken.None);
 
-        await Assert.That(lookup).IsTypeOf<SymbolLookup.NotFound>();
-        await Assert.That(((SymbolLookup.NotFound)lookup).Message).Contains("NoSuchSymbolAnywhere");
+        await Assert.That(symbol).IsNull();
+        await Assert.That(error).Contains("NoSuchSymbolAnywhere");
     }
 
     [Test]
@@ -87,11 +86,11 @@ public class SymbolResolverTests
             .First(i => text.Lines[i].ToString().Contains("public static async Task<string> ExecuteAsync"));
         var character = text.Lines[line].ToString().IndexOf("ExecuteAsync", StringComparison.Ordinal);
 
-        var lookup = await SymbolResolver.ResolveAtPositionAsync(
+        var (symbol, error) = await SymbolResolver.ResolveAtPositionAsync(
             solution, path, line, character, CancellationToken.None);
 
-        await Assert.That(lookup).IsTypeOf<SymbolLookup.Found>();
-        await Assert.That(((SymbolLookup.Found)lookup).Symbol.Name).IsEqualTo("ExecuteAsync");
+        await Assert.That(error).IsNull();
+        await Assert.That(symbol!.Name).IsEqualTo("ExecuteAsync");
     }
 
     [Test]
@@ -101,10 +100,10 @@ public class SymbolResolverTests
 
         var path = Path.Combine(WorkspaceFixture.RepositoryRoot, "src", "DotNetMCP", "Tools", "ToolBase.cs");
 
-        var lookup = await SymbolResolver.ResolveAtPositionAsync(
+        var (symbol, error) = await SymbolResolver.ResolveAtPositionAsync(
             solution, path, line: 100_000, character: 0, CancellationToken.None);
 
-        await Assert.That(lookup).IsTypeOf<SymbolLookup.NotFound>();
-        await Assert.That(((SymbolLookup.NotFound)lookup).Message).Contains("past the end");
+        await Assert.That(symbol).IsNull();
+        await Assert.That(error).Contains("past the end");
     }
 }

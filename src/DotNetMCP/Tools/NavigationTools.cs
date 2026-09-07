@@ -80,12 +80,13 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     {
         return ToolBase.ExecuteAsync(logger, "csharp_symbol_info", async ct =>
         {
-            var (lookup, failure) = await ResolveAsync(symbol, filePath, line, character, content, ct);
-            if (failure is not null)
+            var resolved = await SymbolResolver.ResolveArgumentsAsync(
+                workspace, symbol, filePath, line, character, content, ct);
+
+            if (resolved.Error is { } failure)
                 return failure;
 
-            var target = ((SymbolLookup.Found)lookup!).Symbol;
-            var solution = await workspace.GetSolutionAsync(filePath, ct);
+            var (target, solution) = (resolved.Symbol!, resolved.Solution!);
 
             var sb = new StringBuilder();
             sb.AppendLine(target.ToDisplayString(SymbolFormatter.Signature));
@@ -154,12 +155,13 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     {
         return ToolBase.ExecuteAsync(logger, "csharp_references", async ct =>
         {
-            var (lookup, failure) = await ResolveAsync(symbol, filePath, line, character, content, ct);
-            if (failure is not null)
+            var resolved = await SymbolResolver.ResolveArgumentsAsync(
+                workspace, symbol, filePath, line, character, content, ct);
+
+            if (resolved.Error is { } failure)
                 return failure;
 
-            var target = ((SymbolLookup.Found)lookup!).Symbol;
-            var solution = await workspace.GetSolutionAsync(filePath, ct);
+            var (target, solution) = (resolved.Symbol!, resolved.Solution!);
 
             var referenced = await SymbolFinder.FindReferencesAsync(target, solution, ct);
 
@@ -240,12 +242,13 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     {
         return ToolBase.ExecuteAsync(logger, "csharp_implementations", async ct =>
         {
-            var (lookup, failure) = await ResolveAsync(symbol, filePath, line, character, null, ct);
-            if (failure is not null)
+            var resolved = await SymbolResolver.ResolveArgumentsAsync(
+                workspace, symbol, filePath, line, character, null, ct);
+
+            if (resolved.Error is { } failure)
                 return failure;
 
-            var target = ((SymbolLookup.Found)lookup!).Symbol;
-            var solution = await workspace.GetSolutionAsync(filePath, ct);
+            var (target, solution) = (resolved.Symbol!, resolved.Solution!);
 
             var results = new List<(string Relation, ISymbol Symbol)>();
 
@@ -319,12 +322,13 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     {
         return ToolBase.ExecuteAsync(logger, "csharp_callers", async ct =>
         {
-            var (lookup, failure) = await ResolveAsync(symbol, filePath, line, character, null, ct);
-            if (failure is not null)
+            var resolved = await SymbolResolver.ResolveArgumentsAsync(
+                workspace, symbol, filePath, line, character, null, ct);
+
+            if (resolved.Error is { } failure)
                 return failure;
 
-            var target = ((SymbolLookup.Found)lookup!).Symbol;
-            var solution = await workspace.GetSolutionAsync(filePath, ct);
+            var (target, solution) = (resolved.Symbol!, resolved.Solution!);
 
             var callers = (await SymbolFinder.FindCallersAsync(target, solution, ct)).ToList();
 
@@ -359,31 +363,6 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
         }, cancellationToken);
     }
 
-    /// <summary>
-    /// Resolves the symbol argument, by id or name when given, otherwise by file position.
-    /// Returns the failure text to hand straight back to the caller when resolution did not land on
-    /// exactly one symbol.
-    /// </summary>
-    private async Task<(SymbolLookup? Lookup, string? Failure)> ResolveAsync(
-        string? symbol, string? filePath, int line, int character, string? content, CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(symbol) && string.IsNullOrWhiteSpace(filePath))
-            return (null, "Error: Provide either a symbol id or name, or a filePath with line and character.");
-
-        if (filePath is not null && content is not null)
-            workspace.SetOverlay(Path.GetFullPath(filePath), content);
-
-        var solution = await workspace.GetSolutionAsync(filePath, ct);
-
-        var lookup = string.IsNullOrWhiteSpace(symbol)
-            ? await SymbolResolver.ResolveAtPositionAsync(solution, filePath!, line, character, ct)
-            : await SymbolResolver.ResolveAsync(solution, symbol, ct);
-
-        return SymbolFormatter.FormatFailure(lookup) is { } failure
-            ? (null, failure)
-            : (lookup, null);
-    }
-
     private static async Task<SourceText?> TextForAsync(Solution solution, Location location, CancellationToken ct)
     {
         if (!location.IsInSource)
@@ -393,41 +372,33 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
         return document is null ? null : await document.GetTextAsync(ct);
     }
 
+    /// <summary>
+    /// Turns a kind name into a filter. Every name the tool documents is a member of either
+    /// <see cref="TypeKind"/> (Class, Struct, Interface, Enum) or <see cref="SymbolKind"/> (Method,
+    /// Property, Field, Event, Namespace), so the enums do the parsing.
+    /// </summary>
     private static bool TryParseKind(string kind, out Func<ISymbol, bool> predicate)
     {
-        switch (kind.Trim().ToUpperInvariant())
+        predicate = _ => true;
+        kind = kind.Trim();
+
+        // Enum.TryParse also accepts the underlying numbers; only names are meant to work here.
+        if (kind.Length == 0 || !char.IsLetter(kind[0]))
+            return false;
+
+        if (Enum.TryParse<TypeKind>(kind, ignoreCase: true, out var typeKind))
         {
-            case "CLASS":
-                predicate = s => s is INamedTypeSymbol { TypeKind: TypeKind.Class };
-                return true;
-            case "STRUCT":
-                predicate = s => s is INamedTypeSymbol { TypeKind: TypeKind.Struct };
-                return true;
-            case "INTERFACE":
-                predicate = s => s is INamedTypeSymbol { TypeKind: TypeKind.Interface };
-                return true;
-            case "ENUM":
-                predicate = s => s is INamedTypeSymbol { TypeKind: TypeKind.Enum };
-                return true;
-            case "METHOD":
-                predicate = s => s.Kind == SymbolKind.Method;
-                return true;
-            case "PROPERTY":
-                predicate = s => s.Kind == SymbolKind.Property;
-                return true;
-            case "FIELD":
-                predicate = s => s.Kind == SymbolKind.Field;
-                return true;
-            case "EVENT":
-                predicate = s => s.Kind == SymbolKind.Event;
-                return true;
-            case "NAMESPACE":
-                predicate = s => s.Kind == SymbolKind.Namespace;
-                return true;
-            default:
-                predicate = _ => true;
-                return false;
+            predicate = s => s is INamedTypeSymbol named && named.TypeKind == typeKind;
+            return true;
         }
+
+        if (Enum.TryParse<SymbolKind>(kind, ignoreCase: true, out var symbolKind))
+        {
+            predicate = s => s.Kind == symbolKind;
+            return true;
+        }
+
+        return false;
     }
 
     private static string[] DescribeModifiers(ISymbol symbol)

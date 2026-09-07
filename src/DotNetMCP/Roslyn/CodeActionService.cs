@@ -54,38 +54,31 @@ public sealed class CodeActionService(ILogger<CodeActionService> logger)
     /// <summary>How deep to expand nested action groups.</summary>
     private const int MaxNestingDepth = 3;
 
-    private readonly Lock _gate = new();
-    private CodeFixProvider[]? _fixProviders;
-    private CodeRefactoringProvider[]? _refactoringProviders;
-
     /// <summary>
-    /// Composes the provider catalog once. Costs a few hundred milliseconds, so it is built on first
-    /// use rather than at startup.
+    /// The provider catalog, composed once. Costs a few hundred milliseconds, so it is built on
+    /// first use rather than at startup; <see cref="Lazy{T}"/> defaults to doing that thread-safely.
     /// </summary>
-    private (CodeFixProvider[] Fixes, CodeRefactoringProvider[] Refactorings) GetProviders()
+    private readonly Lazy<(CodeFixProvider[] Fixes, CodeRefactoringProvider[] Refactorings)> _providers =
+        new(() => Compose(logger));
+
+    private static (CodeFixProvider[] Fixes, CodeRefactoringProvider[] Refactorings) Compose(ILogger logger)
     {
-        lock (_gate)
-        {
-            if (_fixProviders is not null && _refactoringProviders is not null)
-                return (_fixProviders, _refactoringProviders);
+        var assemblies = FeatureAssemblyNames.Select(Assembly.Load).ToArray();
+        var container = new ContainerConfiguration().WithAssemblies(assemblies).CreateContainer();
 
-            var assemblies = FeatureAssemblyNames.Select(Assembly.Load).ToArray();
-            var container = new ContainerConfiguration().WithAssemblies(assemblies).CreateContainer();
+        CodeFixProvider[] fixes = [.. container.GetExports<CodeFixProvider>()
+            .Where(p => SupportsCSharp(p.GetType().GetCustomAttribute<ExportCodeFixProviderAttribute>()?.Languages))
+            .OrderBy(p => p.GetType().FullName, StringComparer.Ordinal)];
 
-            _fixProviders = [.. container.GetExports<CodeFixProvider>()
-                .Where(p => SupportsCSharp(p.GetType().GetCustomAttribute<ExportCodeFixProviderAttribute>()?.Languages))
-                .OrderBy(p => p.GetType().FullName, StringComparer.Ordinal)];
+        CodeRefactoringProvider[] refactorings = [.. container.GetExports<CodeRefactoringProvider>()
+            .Where(p => SupportsCSharp(p.GetType().GetCustomAttribute<ExportCodeRefactoringProviderAttribute>()?.Languages))
+            .OrderBy(p => p.GetType().FullName, StringComparer.Ordinal)];
 
-            _refactoringProviders = [.. container.GetExports<CodeRefactoringProvider>()
-                .Where(p => SupportsCSharp(p.GetType().GetCustomAttribute<ExportCodeRefactoringProviderAttribute>()?.Languages))
-                .OrderBy(p => p.GetType().FullName, StringComparer.Ordinal)];
+        logger.LogInformation(
+            "Composed {Fixes} code fix and {Refactorings} refactoring provider(s)",
+            fixes.Length, refactorings.Length);
 
-            logger.LogInformation(
-                "Composed {Fixes} code fix and {Refactorings} refactoring provider(s)",
-                _fixProviders.Length, _refactoringProviders.Length);
-
-            return (_fixProviders, _refactoringProviders);
-        }
+        return (fixes, refactorings);
     }
 
     /// <summary>Collects every fix and refactoring offered for a span, in a stable order.</summary>
@@ -97,7 +90,7 @@ public sealed class CodeActionService(ILogger<CodeActionService> logger)
         bool includeRefactorings,
         CancellationToken ct)
     {
-        var (fixProviders, refactoringProviders) = GetProviders();
+        var (fixProviders, refactoringProviders) = _providers.Value;
         var collected = new List<AvailableCodeAction>();
 
         if (includeFixes)

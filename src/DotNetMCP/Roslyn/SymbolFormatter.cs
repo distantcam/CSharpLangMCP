@@ -104,14 +104,6 @@ internal static class SymbolFormatter
         return sb.ToString();
     }
 
-    /// <summary>Renders a resolution failure or ambiguity; returns null when the lookup succeeded.</summary>
-    public static string? FormatFailure(SymbolLookup lookup) => lookup switch
-    {
-        SymbolLookup.NotFound notFound => notFound.Message,
-        SymbolLookup.Ambiguous ambiguous => FormatAmbiguity(ambiguous.Candidates),
-        _ => null,
-    };
-
     public static string Truncate(string value, int max) =>
         value.Length <= max ? value : value[..max] + "...";
 
