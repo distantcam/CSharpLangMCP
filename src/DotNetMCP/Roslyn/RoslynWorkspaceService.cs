@@ -71,7 +71,7 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
             _diskStamps.Clear();
 
             var projects = solution.Projects
-                .Select(p => new ProjectSummary(p.Name, p.Language, p.Documents.Count(), TargetFrameworkOf(p)))
+                .Select(p => new ProjectSummary(p.Name, p.Documents.Count(), TargetFrameworkOf(p)))
                 .OrderBy(p => p.Name, StringComparer.Ordinal)
                 .ToArray();
 
@@ -115,14 +115,8 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
         return await SyncChangedDocumentsAsync(ct);
     }
 
-    /// <summary>Records an unsaved buffer for a file, or clears it when content is null.</summary>
-    public void SetOverlay(string filePath, string? content)
-    {
-        if (content is null)
-            _overlays.TryRemove(filePath, out _);
-        else
-            _overlays[filePath] = content;
-    }
+    /// <summary>Records an unsaved buffer for a file, replacing what is on disk until reload.</summary>
+    public void SetOverlay(string filePath, string content) => _overlays[filePath] = content;
 
     /// <summary>Finds the document for a path, tolerating case differences on Windows.</summary>
     public static Document? FindDocument(Solution solution, string filePath)

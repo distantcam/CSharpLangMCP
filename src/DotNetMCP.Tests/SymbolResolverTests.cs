@@ -1,5 +1,6 @@
 using DotNetMCP.Roslyn;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.Text;
 
 namespace DotNetMCP.Tests;
 
@@ -47,17 +48,28 @@ public class SymbolResolverTests
         await Assert.That(SymbolEqualityComparer.Default.Equals(original, resolved)).IsTrue();
     }
 
+    /// <summary>
+    /// Declares its own collision rather than borrowing one from the repository: twice now, a
+    /// refactor has deduplicated the method this test was pointing at and broken it.
+    /// </summary>
     [Test]
     public async Task ReportsAmbiguityInsteadOfGuessing()
     {
-        var (_, solution) = await WorkspaceFixture.GetAsync();
+        using var workspace = new AdhocWorkspace();
+        var project = workspace.AddProject("Ambiguity", LanguageNames.CSharp);
+        workspace.AddDocument(project.Id, "Two.cs", SourceText.From("""
+            namespace Amb;
+            public class First { public void Overlap() { } }
+            public class Second { public void Overlap() { } }
+            """));
 
-        // NavigationTools and WorkspaceTools each declare their own TextForAsync.
-        var (symbol, error) = await SymbolResolver.ResolveAsync(solution, "TextForAsync", CancellationToken.None);
+        var (symbol, error) = await SymbolResolver.ResolveAsync(
+            workspace.CurrentSolution, "Overlap", CancellationToken.None);
 
         await Assert.That(symbol).IsNull();
         await Assert.That(error).Contains("ambiguous");
-        await Assert.That(error).Contains("id: ");
+        await Assert.That(error).Contains("Amb.First.Overlap");
+        await Assert.That(error).Contains("Amb.Second.Overlap");
     }
 
     [Test]

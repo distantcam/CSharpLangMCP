@@ -80,4 +80,20 @@ internal static class ChangePreview
     /// <summary>The 1-based line an edit starts on.</summary>
     public static int LineOf(SourceText text, TextChange change) =>
         text.Lines.GetLinePosition(change.Span.Start).Line + 1;
+
+    /// <summary>
+    /// Renders one edit as an insertion, a removal, or a replacement, with both halves put through
+    /// <paramref name="render"/> - which is where a caller decides how to make its text readable.
+    /// </summary>
+    public static string DescribeEdit(SourceText text, TextChange change, Func<string, string> render)
+    {
+        var described = (render(text.ToString(change.Span)), render(change.NewText ?? "")) switch
+        {
+            ("", var to) => $"insert {to}",
+            (var from, "") => $"remove {from}",
+            var (from, to) => $"{from} -> {to}",
+        };
+
+        return $"line {LineOf(text, change)}: {described}";
+    }
 }

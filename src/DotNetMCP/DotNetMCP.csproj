@@ -3,8 +3,6 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
 
     <!-- Publish as one exe. The BuildHost-* folders stay loose beside it: Roslyn starts
          them as separate processes, so they cannot live inside the bundle. -->

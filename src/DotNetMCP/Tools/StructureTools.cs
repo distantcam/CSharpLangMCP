@@ -53,7 +53,7 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
     [McpServerTool(Name = "csharp_type_members")]
     [Description("List the members of a type, including types from referenced assemblies such as the BCL or a NuGet package. Use this instead of guessing what an API offers.")]
     public Task<string> TypeMembersAsync(
-        [Description("Type name: 'LspClient', 'DotNetMCP.Roslyn.RoslynWorkspaceService', or a metadata name like 'System.Collections.Generic.List`1'")] string typeName,
+        [Description("Type name: 'SymbolResolver', 'DotNetMCP.Roslyn.RoslynWorkspaceService', or a metadata name like 'System.Collections.Generic.List`1'")] string typeName,
         [Description("Include members inherited from base types (default false)")] bool includeInherited = false,
         [Description("Include non-public members (default false)")] bool includeNonPublic = false,
         [Description("Maximum members to return (default 200)")] int maxResults = 200,
@@ -134,7 +134,7 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
 
     /// <summary>
     /// Resolves a type by metadata name first, then by a source declaration search, so both
-    /// 'System.Collections.Generic.List`1' and a bare 'LspClient' work.
+    /// 'System.Collections.Generic.List`1' and a bare 'SymbolResolver' work.
     /// </summary>
     private static async Task<INamedTypeSymbol?> FindTypeAsync(Solution solution, string typeName, CancellationToken ct)
     {

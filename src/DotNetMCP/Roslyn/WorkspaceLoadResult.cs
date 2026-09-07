@@ -14,4 +14,4 @@ public sealed record WorkspaceLoadResult(
     IReadOnlyList<string> Failures,
     TimeSpan Duration);
 
-public sealed record ProjectSummary(string Name, string? Language, int DocumentCount, string? TargetFramework);
+public sealed record ProjectSummary(string Name, int DocumentCount, string? TargetFramework);

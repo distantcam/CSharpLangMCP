@@ -38,11 +38,11 @@ internal static class SymbolFormatter
             | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
     /// <summary>Writes a symbol as a bullet with its resolvable id underneath.</summary>
-    public static void AppendSymbolLine(StringBuilder sb, ISymbol symbol, string indent = "")
+    public static void AppendSymbolLine(StringBuilder sb, ISymbol symbol)
     {
-        sb.AppendLine($"{indent}- {symbol.Kind} {symbol.ToDisplayString(Signature)}");
+        sb.AppendLine($"- {symbol.Kind} {symbol.ToDisplayString(Signature)}");
         if (SymbolResolver.IdFor(symbol) is { } id)
-            sb.AppendLine($"{indent}  id: {id}");
+            sb.AppendLine($"  id: {id}");
     }
 
     /// <summary>Writes a source location as "path:line:col" followed by the source line itself.</summary>
@@ -112,5 +112,32 @@ internal static class SymbolFormatter
     {
         if (total > shown)
             sb.AppendLine($"\n... and {total - shown} more {noun} (raise maxResults to see them).");
+    }
+}
+
+/// <summary>
+/// Reads the source text behind a location, remembering each document it opens.
+/// </summary>
+/// <remarks>
+/// A result set points at the same handful of files over and over - every reference in a class, every
+/// diagnostic in a method - so the whole document text is fetched once per file rather than per hit.
+/// </remarks>
+internal sealed class SourceTextCache(Solution solution)
+{
+    private readonly Dictionary<string, SourceText?> _texts = new(RoslynWorkspaceService.PathComparer);
+
+    public async Task<SourceText?> ForAsync(Location location, CancellationToken ct)
+    {
+        if (!location.IsInSource)
+            return null;
+
+        var path = location.GetLineSpan().Path;
+        if (_texts.TryGetValue(path, out var cached))
+            return cached;
+
+        var document = RoslynWorkspaceService.FindDocument(solution, path);
+        var text = document is null ? null : await document.GetTextAsync(ct);
+        _texts[path] = text;
+        return text;
     }
 }

@@ -2,7 +2,6 @@ using System.ComponentModel;
 using System.Text;
 using DotNetMCP.Roslyn;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
@@ -118,12 +117,12 @@ public sealed class WorkspaceTools(
 
             sb.AppendLine();
 
-            var textCache = new Dictionary<string, SourceText?>(RoslynWorkspaceService.PathComparer);
+            var texts = new SourceTextCache(solution);
 
             foreach (var diagnostic in filtered.Take(maxResults))
             {
                 sb.AppendLine($"[{diagnostic.Severity.ToString().ToUpperInvariant()}] {diagnostic.Id}: {diagnostic.GetMessage()}");
-                SymbolFormatter.AppendLocationLine(sb, diagnostic.Location, await TextForAsync(solution, diagnostic.Location, textCache, ct));
+                SymbolFormatter.AppendLocationLine(sb, diagnostic.Location, await texts.ForAsync(diagnostic.Location, ct));
                 sb.AppendLine();
             }
 
@@ -185,21 +184,5 @@ public sealed class WorkspaceTools(
         }
 
         return (all, isSolution ? "the solution" : $"project {scope}");
-    }
-
-    private static async Task<SourceText?> TextForAsync(
-        Solution solution, Location location, Dictionary<string, SourceText?> cache, CancellationToken ct)
-    {
-        if (!location.IsInSource)
-            return null;
-
-        var path = location.GetLineSpan().Path;
-        if (cache.TryGetValue(path, out var cached))
-            return cached;
-
-        var document = RoslynWorkspaceService.FindDocument(solution, path);
-        var text = document is null ? null : await document.GetTextAsync(ct);
-        cache[path] = text;
-        return text;
     }
 }

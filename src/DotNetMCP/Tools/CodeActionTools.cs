@@ -33,8 +33,8 @@ public sealed class CodeActionTools(
         return ToolBase.ExecuteAsync(logger, "csharp_code_actions", async ct =>
         {
             var located = await LocateAsync(filePath, startLine, endLine, startCharacter, endCharacter, includeAnalyzers, content, ct);
-            if (located.Error is not null)
-                return located.Error;
+            if (located.Error is { } error)
+                return error;
 
             var (document, span, diagnostics) = (located.Document!, located.Span, located.Diagnostics!);
 
@@ -99,8 +99,8 @@ public sealed class CodeActionTools(
                 return "Error: title must not be empty.";
 
             var located = await LocateAsync(filePath, startLine, endLine, startCharacter, endCharacter, includeAnalyzers, content, ct);
-            if (located.Error is not null)
-                return located.Error;
+            if (located.Error is { } error)
+                return error;
 
             var (document, span, diagnostics) = (located.Document!, located.Span, located.Diagnostics!);
 
@@ -139,12 +139,6 @@ public sealed class CodeActionTools(
         }, cancellationToken);
     }
 
-    private sealed record Located(
-        string? Error,
-        Document? Document,
-        TextSpan Span,
-        IReadOnlyList<Diagnostic>? Diagnostics);
-
     /// <summary>
     /// Resolves the file and line range to a document, a span, and the diagnostics on that document.
     /// </summary>
@@ -152,7 +146,7 @@ public sealed class CodeActionTools(
     /// Diagnostics are computed fresh rather than read from a cache: a fix offered against a stale
     /// diagnostic either fails to apply or silently does the wrong thing.
     /// </remarks>
-    private async Task<Located> LocateAsync(
+    private async Task<(Document? Document, TextSpan Span, IReadOnlyList<Diagnostic>? Diagnostics, string? Error)> LocateAsync(
         string filePath, int startLine, int? endLine, int? startCharacter, int? endCharacter,
         bool includeAnalyzers, string? content, CancellationToken ct)
     {
@@ -164,34 +158,34 @@ public sealed class CodeActionTools(
 
         var document = RoslynWorkspaceService.FindDocument(solution, full);
         if (document is null)
-            return new Located($"Error: File is not part of the loaded workspace: {full}", null, default, null);
+            return (null, default, null, $"Error: File is not part of the loaded workspace: {full}");
 
         var text = await document.GetTextAsync(ct);
         var lastLine = endLine ?? startLine;
 
         if (!SymbolResolver.TryGetPosition(text, startLine, startCharacter ?? 0, out var start, out var startError))
-            return new Located($"Error: {startError}", null, default, null);
+            return (null, default, null, $"Error: {startError}");
 
         int end;
         if (endCharacter is { } explicitEnd)
         {
             if (!SymbolResolver.TryGetPosition(text, lastLine, explicitEnd, out end, out var endError))
-                return new Located($"Error: {endError}", null, default, null);
+                return (null, default, null, $"Error: {endError}");
         }
         else
         {
             if (lastLine >= text.Lines.Count)
-                return new Located($"Error: Line {lastLine + 1} is past the end of the file ({text.Lines.Count} line(s)).", null, default, null);
+                return (null, default, null, $"Error: Line {lastLine + 1} is past the end of the file ({text.Lines.Count} line(s)).");
 
             end = text.Lines[lastLine].End;
         }
 
         if (end < start)
-            return new Located("Error: The end of the range is before its start.", null, default, null);
+            return (null, default, null, "Error: The end of the range is before its start.");
 
         var model = await document.GetSemanticModelAsync(ct);
         if (model is null)
-            return new Located($"Error: Could not build a semantic model for {full}", null, default, null);
+            return (null, default, null, $"Error: Could not build a semantic model for {full}");
 
         var diagnostics = new List<Diagnostic>(model.GetDiagnostics(cancellationToken: ct));
 
@@ -200,21 +194,14 @@ public sealed class CodeActionTools(
         if (includeAnalyzers)
             diagnostics.AddRange(await analyzers.GetFileDiagnosticsAsync(document, ct));
 
-        return new Located(null, document, TextSpan.FromBounds(start, end), diagnostics);
+        return (document, TextSpan.FromBounds(start, end), diagnostics, null);
     }
 
-    private static string DescribeEdit(SourceText text, TextChange change)
-    {
-        var replaced = text.ToString(change.Span).ReplaceLineEndings(" ").Trim();
-        var inserted = (change.NewText ?? "").ReplaceLineEndings(" ").Trim();
-
-        var described = (replaced, inserted) switch
+    /// <summary>Code edits are ordinary source, so they read best flattened to one quoted line.</summary>
+    private static string DescribeEdit(SourceText text, TextChange change) =>
+        ChangePreview.DescribeEdit(text, change, static value =>
         {
-            ("", var to) => $"insert \"{SymbolFormatter.Truncate(to, 120)}\"",
-            (var from, "") => $"remove \"{SymbolFormatter.Truncate(from, 120)}\"",
-            var (from, to) => $"\"{SymbolFormatter.Truncate(from, 80)}\" -> \"{SymbolFormatter.Truncate(to, 80)}\"",
-        };
-
-        return $"line {ChangePreview.LineOf(text, change)}: {described}";
-    }
+            var flattened = value.ReplaceLineEndings(" ").Trim();
+            return flattened.Length == 0 ? "" : $"\"{SymbolFormatter.Truncate(flattened, 100)}\"";
+        });
 }

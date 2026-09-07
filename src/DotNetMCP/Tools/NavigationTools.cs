@@ -3,7 +3,6 @@ using System.Text;
 using DotNetMCP.Roslyn;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
-using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
@@ -16,7 +15,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     [McpServerTool(Name = "csharp_find_symbol")]
     [Description("Search the whole solution for declared symbols by name or wildcard pattern. Start here: the ids it returns address a symbol exactly for the other tools, with no file position needed.")]
     public Task<string> FindSymbolAsync(
-        [Description("Name or substring to search for, e.g. 'StartAsync' or 'LspClient'")] string query,
+        [Description("Name or substring to search for, e.g. 'LoadAsync' or 'SymbolResolver'")] string query,
         [Description("Restrict to a kind: Class, Struct, Interface, Enum, Method, Property, Field, Event, Namespace. Omit for all.")] string? kind = null,
         [Description("Maximum results (default 50)")] int maxResults = 50,
         CancellationToken cancellationToken = default)
@@ -71,7 +70,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     [McpServerTool(Name = "csharp_symbol_info")]
     [Description("Get the signature, documentation, base types and declaration sites of a symbol. Combines what hover and go-to-definition used to return separately.")]
     public Task<string> SymbolInfoAsync(
-        [Description("Symbol id from csharp_find_symbol, or a name like 'LspClient.StartAsync'. Omit to use filePath/line/character instead.")] string? symbol = null,
+        [Description("Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'. Omit to use filePath/line/character instead.")] string? symbol = null,
         [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
@@ -87,6 +86,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                 return failure;
 
             var (target, solution) = (resolved.Symbol!, resolved.Solution!);
+            var texts = new SourceTextCache(solution);
 
             var sb = new StringBuilder();
             sb.AppendLine(target.ToDisplayString(SymbolFormatter.Signature));
@@ -128,7 +128,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                 sb.AppendLine($"Declared at ({sourceLocations.Length} location(s)):");
                 foreach (var location in sourceLocations)
                 {
-                    var text = await TextForAsync(solution, location, ct);
+                    var text = await texts.ForAsync(location, ct);
                     SymbolFormatter.AppendLocationLine(sb, location, text);
                 }
             }
@@ -144,7 +144,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     [McpServerTool(Name = "csharp_references")]
     [Description("Find every reference to a symbol across the solution, grouped by file, with the source line at each use site.")]
     public Task<string> ReferencesAsync(
-        [Description("Symbol id from csharp_find_symbol, or a name like 'LspClient.StartAsync'. Omit to use filePath/line/character instead.")] string? symbol = null,
+        [Description("Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'. Omit to use filePath/line/character instead.")] string? symbol = null,
         [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
@@ -162,6 +162,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                 return failure;
 
             var (target, solution) = (resolved.Symbol!, resolved.Solution!);
+            var texts = new SourceTextCache(solution);
 
             var referenced = await SymbolFinder.FindReferencesAsync(target, solution, ct);
 
@@ -181,7 +182,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                 {
                     sb.AppendLine("Declaration:");
                     foreach (var location in declarations)
-                        SymbolFormatter.AppendLocationLine(sb, location, await TextForAsync(solution, location, ct));
+                        SymbolFormatter.AppendLocationLine(sb, location, await texts.ForAsync(location, ct));
                     sb.AppendLine();
                 }
             }
@@ -249,6 +250,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                 return failure;
 
             var (target, solution) = (resolved.Symbol!, resolved.Solution!);
+            var texts = new SourceTextCache(solution);
 
             var results = new List<(string Relation, ISymbol Symbol)>();
 
@@ -302,7 +304,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
 
                 var location = found.Locations.FirstOrDefault(l => l.IsInSource);
                 if (location is not null)
-                    SymbolFormatter.AppendLocationLine(sb, location, await TextForAsync(solution, location, ct), "    ");
+                    SymbolFormatter.AppendLocationLine(sb, location, await texts.ForAsync(location, ct), "    ");
             }
 
             SymbolFormatter.AppendTruncationNote(sb, Math.Min(maxResults, results.Count), results.Count, "result(s)");
@@ -313,7 +315,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     [McpServerTool(Name = "csharp_callers")]
     [Description("Find the methods that call a given method or access a given property or field, with the calling source line.")]
     public Task<string> CallersAsync(
-        [Description("Symbol id from csharp_find_symbol, or a name like 'LspClient.StartAsync'")] string? symbol = null,
+        [Description("Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'")] string? symbol = null,
         [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
@@ -329,6 +331,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                 return failure;
 
             var (target, solution) = (resolved.Symbol!, resolved.Solution!);
+            var texts = new SourceTextCache(solution);
 
             var callers = (await SymbolFinder.FindCallersAsync(target, solution, ct)).ToList();
 
@@ -355,21 +358,12 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                     sb.AppendLine($"  id: {id}");
 
                 foreach (var location in caller.Locations.Where(l => l.IsInSource))
-                    SymbolFormatter.AppendLocationLine(sb, location, await TextForAsync(solution, location, ct), "    ");
+                    SymbolFormatter.AppendLocationLine(sb, location, await texts.ForAsync(location, ct), "    ");
             }
 
             SymbolFormatter.AppendTruncationNote(sb, Math.Min(maxResults, callers.Count), callers.Count, "caller(s)");
             return sb.ToString();
         }, cancellationToken);
-    }
-
-    private static async Task<SourceText?> TextForAsync(Solution solution, Location location, CancellationToken ct)
-    {
-        if (!location.IsInSource)
-            return null;
-
-        var document = RoslynWorkspaceService.FindDocument(solution, location.GetLineSpan().Path);
-        return document is null ? null : await document.GetTextAsync(ct);
     }
 
     /// <summary>
