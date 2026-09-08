@@ -29,7 +29,7 @@ public static class WorkspaceFixture
             {
                 _service = new RoslynWorkspaceService(NullLogger<RoslynWorkspaceService>.Instance);
                 await _service.LoadAsync(RepositoryRoot, CancellationToken.None);
-                _solution = await _service.GetSolutionAsync(null, CancellationToken.None);
+                _solution = await _service.GetSolutionAsync(null, overlay: null, CancellationToken.None);
             }
 
             return (_service, _solution!);

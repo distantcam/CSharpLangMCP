@@ -43,10 +43,11 @@ internal static class SymbolResolver
         if (string.IsNullOrWhiteSpace(symbol) && string.IsNullOrWhiteSpace(filePath))
             return (null, null, "Error: Provide either a symbol id or name, or a filePath with line and character.");
 
-        if (filePath is not null && content is not null)
-            workspace.SetOverlay(Path.GetFullPath(filePath), content);
+        (string Path, string Content)? overlay = filePath is not null && content is not null
+            ? (Path.GetFullPath(filePath), content)
+            : null;
 
-        var solution = await workspace.GetSolutionAsync(filePath, ct);
+        var solution = await workspace.GetSolutionAsync(filePath, overlay, ct);
 
         var (found, error) = string.IsNullOrWhiteSpace(symbol)
             ? await ResolveAtPositionAsync(solution, filePath!, line, character, ct)

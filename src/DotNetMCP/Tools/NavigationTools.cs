@@ -25,7 +25,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
             if (string.IsNullOrWhiteSpace(query))
                 return "Error: query must not be empty.";
 
-            var solution = await workspace.GetSolutionAsync(null, ct);
+            var solution = await workspace.GetSolutionAsync(null, overlay: null, ct);
 
             var found = await SymbolFinder.FindSourceDeclarationsWithPatternAsync(
                 solution, query, SymbolFilter.All, ct);

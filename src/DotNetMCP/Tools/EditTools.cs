@@ -70,7 +70,7 @@ public sealed class EditTools(ILogger<EditTools> logger, RoslynWorkspaceService 
         return ToolBase.ExecuteAsync(logger, "csharp_format", async ct =>
         {
             var full = Path.GetFullPath(filePath);
-            var solution = await workspace.GetSolutionAsync(full, ct);
+            var solution = await workspace.GetSolutionAsync(full, overlay: null, ct);
 
             var document = RoslynWorkspaceService.FindDocument(solution, full);
             if (document is null)

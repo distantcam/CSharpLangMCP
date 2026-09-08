@@ -8,7 +8,7 @@ namespace DotNetMCP.Roslyn;
 
 /// <summary>
 /// Owns the single <see cref="MSBuildWorkspace"/> and hands tools a solution snapshot that reflects
-/// both on-disk state and any caller-supplied unsaved buffers.
+/// on-disk state, plus whatever unsaved buffer the calling tool supplied for that one call.
 /// </summary>
 /// <remarks>
 /// Replaces the former LSP bridge. MSBuild project evaluation happens in Roslyn's out-of-process
@@ -18,9 +18,6 @@ namespace DotNetMCP.Roslyn;
 public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logger) : IDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
-
-    /// <summary>Caller-supplied buffer contents, keyed by full path, overriding what is on disk.</summary>
-    private readonly ConcurrentDictionary<string, string> _overlays = new(PathComparer);
 
     /// <summary>Last-known write time per document, used to detect edits made outside this server.</summary>
     private readonly ConcurrentDictionary<string, DateTime> _diskStamps = new(PathComparer);
@@ -67,7 +64,6 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
             _workspace = workspace;
             _solution = solution;
             _loadedPath = resolved;
-            _overlays.Clear();
             _diskStamps.Clear();
 
             var projects = solution.Projects
@@ -93,7 +89,13 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
     /// A file used to discover a workspace when none has been loaded yet; walked upwards looking for
     /// a solution or project file.
     /// </param>
-    public async Task<Solution> GetSolutionAsync(string? nearPath, CancellationToken ct)
+    /// <param name="overlay">
+    /// An unsaved buffer for one file, applied to the snapshot this call returns and to nothing else.
+    /// It is deliberately not remembered: a buffer supplied once must not go on shadowing the file on
+    /// disk for the rest of the session, which is what makes the cached solution below safe to keep.
+    /// </param>
+    public async Task<Solution> GetSolutionAsync(
+        string? nearPath, (string Path, string Content)? overlay, CancellationToken ct)
     {
         if (_solution is null)
         {
@@ -112,11 +114,18 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
             await LoadAsync(discovered, ct);
         }
 
-        return await SyncChangedDocumentsAsync(ct);
-    }
+        var solution = await SyncChangedDocumentsAsync(ct);
 
-    /// <summary>Records an unsaved buffer for a file, replacing what is on disk until reload.</summary>
-    public void SetOverlay(string filePath, string content) => _overlays[filePath] = content;
+        if (overlay is not { } buffer)
+            return solution;
+
+        // Forked off the cached solution rather than assigned back to it, so the buffer reaches this
+        // caller and no one else.
+        var document = FindDocument(solution, buffer.Path);
+        return document is null
+            ? solution
+            : solution.WithDocumentText(document.Id, SourceText.From(buffer.Content));
+    }
 
     /// <summary>Finds the document for a path, tolerating case differences on Windows.</summary>
     public static Document? FindDocument(Solution solution, string filePath)
@@ -132,7 +141,7 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
             .FirstOrDefault(d => d.FilePath is not null && PathComparer.Equals(d.FilePath, full));
     }
 
-    /// <summary>Re-reads documents whose on-disk timestamp moved, then applies caller overlays on top.</summary>
+    /// <summary>Re-reads documents whose on-disk timestamp moved since they were last seen.</summary>
     private async Task<Solution> SyncChangedDocumentsAsync(CancellationToken ct)
     {
         var solution = _solution!;
@@ -141,18 +150,7 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
         {
             foreach (var document in project.Documents)
             {
-                if (document.FilePath is not { } filePath)
-                    continue;
-
-                if (_overlays.TryGetValue(filePath, out var overlay))
-                {
-                    var current = await document.GetTextAsync(ct);
-                    if (!string.Equals(current.ToString(), overlay, StringComparison.Ordinal))
-                        solution = solution.WithDocumentText(document.Id, SourceText.From(overlay));
-                    continue;
-                }
-
-                if (!File.Exists(filePath))
+                if (document.FilePath is not { } filePath || !File.Exists(filePath))
                     continue;
 
                 var stamp = File.GetLastWriteTimeUtc(filePath);
@@ -217,7 +215,6 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
         _workspace = null;
         _solution = null;
         _loadedPath = null;
-        _overlays.Clear();
         _diskStamps.Clear();
     }
 

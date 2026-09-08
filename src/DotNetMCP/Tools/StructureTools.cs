@@ -23,10 +23,8 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
         return ToolBase.ExecuteAsync(logger, "csharp_outline", async ct =>
         {
             var full = Path.GetFullPath(filePath);
-            if (content is not null)
-                workspace.SetOverlay(full, content);
-
-            var solution = await workspace.GetSolutionAsync(full, ct);
+            var solution = await workspace.GetSolutionAsync(
+                full, content is null ? null : (full, content), ct);
 
             var document = RoslynWorkspaceService.FindDocument(solution, full);
             if (document is null)
@@ -61,7 +59,7 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
     {
         return ToolBase.ExecuteAsync(logger, "csharp_type_members", async ct =>
         {
-            var solution = await workspace.GetSolutionAsync(null, ct);
+            var solution = await workspace.GetSolutionAsync(null, overlay: null, ct);
 
             var type = await FindTypeAsync(solution, typeName, ct);
             if (type is null)

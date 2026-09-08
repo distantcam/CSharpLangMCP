@@ -42,6 +42,31 @@ public class WorkspaceLoadTests
         await Assert.That(RoslynWorkspaceService.FindDocument(solution, path.ToUpperInvariant())).IsNotNull();
     }
 
+    /// <summary>
+    /// An unsaved buffer used to be remembered forever, so the first tool call that passed one
+    /// pinned that file to it: later saves were skipped, and even the server writing the file
+    /// itself left the stale buffer in front of what it had just written.
+    /// </summary>
+    [Test]
+    public async Task AnOverlayDoesNotOutliveTheCallThatSuppliedIt()
+    {
+        var (service, _) = await WorkspaceFixture.GetAsync();
+        var path = Path.Combine(WorkspaceFixture.RepositoryRoot, "src", "DotNetMCP", "Tools", "ToolBase.cs");
+
+        const string Buffer = "namespace DotNetMCP.Tools; internal static class ToolBase { }";
+
+        var overlaid = await service.GetSolutionAsync(path, (path, Buffer), CancellationToken.None);
+        var supplied = RoslynWorkspaceService.FindDocument(overlaid, path);
+        await Assert.That(supplied).IsNotNull();
+        await Assert.That((await supplied!.GetTextAsync()).ToString()).IsEqualTo(Buffer);
+
+        // The very next call, with no buffer, must be back to what is on disk.
+        var fresh = await service.GetSolutionAsync(path, overlay: null, CancellationToken.None);
+        var reread = RoslynWorkspaceService.FindDocument(fresh, path);
+        await Assert.That(reread).IsNotNull();
+        await Assert.That((await reread!.GetTextAsync()).ToString()).IsEqualTo(await File.ReadAllTextAsync(path));
+    }
+
     [Test]
     public async Task ResolvesADirectoryToItsSolutionFile()
     {

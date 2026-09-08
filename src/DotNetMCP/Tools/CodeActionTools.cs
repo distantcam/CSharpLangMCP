@@ -151,10 +151,8 @@ public sealed class CodeActionTools(
         bool includeAnalyzers, string? content, CancellationToken ct)
     {
         var full = Path.GetFullPath(filePath);
-        if (content is not null)
-            workspace.SetOverlay(full, content);
-
-        var solution = await workspace.GetSolutionAsync(full, ct);
+        var solution = await workspace.GetSolutionAsync(
+            full, content is null ? null : (full, content), ct);
 
         var document = RoslynWorkspaceService.FindDocument(solution, full);
         if (document is null)

@@ -84,10 +84,11 @@ public sealed class WorkspaceTools(
                 return $"Error: Unknown severity '{minimumSeverity}'. Use Error, Warning, Info or Hidden.";
 
             var isFile = scope.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
-            if (isFile && content is not null)
-                workspace.SetOverlay(Path.GetFullPath(scope), content);
+            (string Path, string Content)? overlay = isFile && content is not null
+                ? (Path.GetFullPath(scope), content)
+                : null;
 
-            var solution = await workspace.GetSolutionAsync(isFile ? scope : null, ct);
+            var solution = await workspace.GetSolutionAsync(isFile ? scope : null, overlay, ct);
 
             var (diagnostics, description) = await CollectAsync(solution, scope, isFile, includeAnalyzers, ct);
             if (diagnostics is null)
