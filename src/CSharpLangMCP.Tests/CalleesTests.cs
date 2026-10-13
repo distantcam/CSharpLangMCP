@@ -79,6 +79,10 @@ public class CalleesTests
 
         await Assert.That(result).Contains("CalleesProbe.cs:26:60");
         await Assert.That(result).Contains("CalleesProbe.cs:26:73");
+
+        // In source order, though the walk reaches the outer (second) Append first.
+        await Assert.That(result.IndexOf("CalleesProbe.cs:26:60", StringComparison.Ordinal))
+            .IsLessThan(result.IndexOf("CalleesProbe.cs:26:73", StringComparison.Ordinal));
     }
 
     [Test]

@@ -604,8 +604,14 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
             if (SymbolResolver.IdFor(callee) is { } id)
                 sb.AppendLine($"  id: {id}");
 
-            foreach (var (_, site) in group)
+            // The operation walk visits the outermost call of a chain first, so a.F().F() would
+            // otherwise list the second F before the first.
+            foreach (var (_, site) in group
+                .OrderBy(s => s.Site.SourceTree?.FilePath, StringComparer.Ordinal)
+                .ThenBy(s => s.Site.SourceSpan.Start))
+            {
                 SymbolFormatter.AppendLocationLine(sb, site, await texts.ForAsync(site, ct), "    ");
+            }
         }
 
         SymbolFormatter.AppendTruncationNote(sb, Math.Min(maxResults, grouped.Count), grouped.Count, "callee(s)");
