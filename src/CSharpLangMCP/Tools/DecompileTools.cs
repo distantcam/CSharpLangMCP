@@ -101,9 +101,12 @@ public sealed class DecompileTools(ILogger<DecompileTools> logger, RoslynWorkspa
         // Roslyn and ILSpy both speak XML documentation ids, which pins down the exact overload.
         // Roslyn appends a '~ReturnType' suffix ILSpy omits outside conversion operators, so an exact
         // miss is retried without it.
+        // ILSpy synthesizes members with no metadata behind them - a struct's parameterless
+        // constructor - and computing their id throws. They have nothing to decompile anyway.
         var id = SymbolResolver.IdFor(target);
-        var member = definition.Members.FirstOrDefault(m => IdStringProvider.GetIdString(m) == id)
-            ?? definition.Members.FirstOrDefault(m => WithoutReturnType(IdStringProvider.GetIdString(m)) == WithoutReturnType(id));
+        var members = definition.Members.Where(m => !m.MetadataToken.IsNil).ToList();
+        var member = members.FirstOrDefault(m => IdStringProvider.GetIdString(m) == id)
+            ?? members.FirstOrDefault(m => WithoutReturnType(IdStringProvider.GetIdString(m)) == WithoutReturnType(id));
 
         return member is null
             ? header + $"// {id} was not matched; showing the whole type.\n" + decompiler.DecompileTypeAsString(typeName)

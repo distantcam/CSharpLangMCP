@@ -48,6 +48,19 @@ public class DecompileTests
         await Assert.That(result).DoesNotContain("GetFirstSymbolForDeclarationId");
     }
 
+    /// <summary>
+    /// ILSpy gives every struct a synthesized parameterless constructor with no metadata behind it,
+    /// and asking for that member's id throws - which broke decompiling any member of any struct.
+    /// </summary>
+    [Test]
+    public async Task StructMembersDecompile()
+    {
+        var result = await DecompileAsync("M:Microsoft.CodeAnalysis.Text.TextSpan.Contains(System.Int32)");
+
+        await Assert.That(result).DoesNotStartWith("Error:");
+        await Assert.That(result).Contains("public bool Contains(int position)");
+    }
+
     [Test]
     public async Task SourceSymbolsAreRefused()
     {
