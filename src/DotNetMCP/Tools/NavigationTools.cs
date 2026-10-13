@@ -3,6 +3,7 @@ using System.Text;
 using DotNetMCP.Roslyn;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
+using Microsoft.CodeAnalysis.Operations;
 using Microsoft.Extensions.Logging;
 using ModelContextProtocol.Server;
 
@@ -494,6 +495,136 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
             SymbolFormatter.AppendTruncationNote(sb, Math.Min(maxResults, callers.Count), callers.Count, "caller(s)");
             return sb.ToString();
         }, cancellationToken);
+    }
+
+    [McpServerTool(Name = "csharp_callees")]
+    [Description("Find what a method, constructor or property calls: the methods, constructors and properties its body invokes, including inside lambdas and local functions. The reverse of csharp_callers.")]
+    public Task<string> CalleesAsync(
+        [Description("Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'")] string? symbol = null,
+        [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
+        [Description("0-based line number, when locating by position")] int line = 0,
+        [Description("0-based character position, when locating by position")] int character = 0,
+        [Description("Only report callees declared in this solution's source, hiding BCL and package calls. Default false.")] bool sourceOnly = false,
+        [Description("Maximum callees to return (default 100)")] int maxResults = 100,
+        CancellationToken cancellationToken = default)
+    {
+        return ToolBase.ExecuteAsync(logger, "csharp_callees", async ct =>
+        {
+            var resolved = await SymbolResolver.ResolveArgumentsAsync(
+                workspace, symbol, filePath, line, character, null, ct);
+
+            if (resolved.Error is { } failure)
+                return failure;
+
+            return await DescribeCalleesAsync(resolved.Solution!, resolved.Symbol!, sourceOnly, maxResults, ct);
+        }, cancellationToken);
+    }
+
+    internal static async Task<string> DescribeCalleesAsync(
+        Solution solution, ISymbol target, bool sourceOnly, int maxResults, CancellationToken ct)
+    {
+        if (target.DeclaringSyntaxReferences.Length == 0)
+            return $"Error: {target.ToDisplayString()} is declared in metadata, so it has no body here. Use csharp_decompile to read it.";
+
+        var sites = new List<(ISymbol Callee, Location Site)>();
+
+        // Partial declarations each contribute a body, so every one is walked.
+        foreach (var reference in target.DeclaringSyntaxReferences)
+        {
+            var declaration = await reference.GetSyntaxAsync(ct);
+            if (solution.GetDocument(declaration.SyntaxTree) is not { } document ||
+                await document.GetSemanticModelAsync(ct) is not { } model)
+            {
+                continue;
+            }
+
+            foreach (var root in OperationRoots(declaration, model, ct))
+            {
+                foreach (var operation in root.DescendantsAndSelf())
+                {
+                    ISymbol? callee = operation switch
+                    {
+                        IInvocationOperation invocation => invocation.TargetMethod,
+                        IObjectCreationOperation creation => creation.Constructor,
+                        IPropertyReferenceOperation property => property.Property,
+                        IMethodReferenceOperation methodGroup => methodGroup.Method,
+                        _ => null,
+                    };
+
+                    if (callee is null || operation.IsImplicit)
+                        continue;
+
+                    // Report the declaration rather than one constructed or reduced form of it, so
+                    // List<int>.Add and List<string>.Add, or an extension call either way, group together.
+                    callee = callee is IMethodSymbol { ReducedFrom: { } reduced } ? reduced : callee.OriginalDefinition;
+
+                    if (sourceOnly && !callee.Locations.Any(l => l.IsInSource))
+                        continue;
+
+                    sites.Add((callee, operation.Syntax.GetLocation()));
+                }
+            }
+        }
+
+        var texts = new SourceTextCache(solution);
+        var sb = new StringBuilder();
+        sb.AppendLine($"Callees of {target.ToDisplayString(SymbolFormatter.Signature)}");
+        sb.AppendLine();
+
+        var grouped = sites
+            .GroupBy(s => s.Callee, SymbolEqualityComparer.Default)
+            .OrderBy(g => g.Min(s => s.Site.SourceSpan.Start))
+            .ToList();
+
+        if (grouped.Count == 0)
+        {
+            sb.AppendLine(sourceOnly
+                ? "No calls into source. Pass sourceOnly=false to include BCL and package calls."
+                : "No calls found.");
+            return sb.ToString();
+        }
+
+        // Ordered by first call site, which reads as the order the body does things in.
+        sb.AppendLine($"{grouped.Count} callee(s), in order of first call:");
+        sb.AppendLine();
+
+        foreach (var group in grouped.Take(maxResults))
+        {
+            var callee = group.Key!;
+            var origin = callee.Locations.Any(l => l.IsInSource)
+                ? ""
+                : $"   [{callee.ContainingAssembly?.Name ?? "metadata"}]";
+
+            sb.AppendLine($"- {callee.Kind} {callee.ToDisplayString(SymbolFormatter.Signature)}{origin}");
+            if (SymbolResolver.IdFor(callee) is { } id)
+                sb.AppendLine($"  id: {id}");
+
+            foreach (var (_, site) in group)
+                SymbolFormatter.AppendLocationLine(sb, site, await texts.ForAsync(site, ct), "    ");
+        }
+
+        SymbolFormatter.AppendTruncationNote(sb, Math.Min(maxResults, grouped.Count), grouped.Count, "callee(s)");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The outermost nodes under a declaration that have an operation tree: a method's body, each
+    /// accessor of a property, an expression body, an initializer. Their descendants cover the rest,
+    /// lambdas and local functions included.
+    /// </summary>
+    private static IEnumerable<IOperation> OperationRoots(SyntaxNode node, SemanticModel model, CancellationToken ct)
+    {
+        if (model.GetOperation(node, ct) is { } operation)
+        {
+            yield return operation;
+            yield break;
+        }
+
+        foreach (var child in node.ChildNodes())
+        {
+            foreach (var root in OperationRoots(child, model, ct))
+                yield return root;
+        }
     }
 
     /// <summary>
