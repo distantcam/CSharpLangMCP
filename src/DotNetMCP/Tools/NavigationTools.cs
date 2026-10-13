@@ -312,6 +312,136 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
         }, cancellationToken);
     }
 
+    [McpServerTool(Name = "csharp_type_hierarchy")]
+    [Description("Show a type's full hierarchy in one call: its base class chain and interfaces above it, and the tree of types deriving from or implementing it below.")]
+    public Task<string> TypeHierarchyAsync(
+        [Description("Symbol id from csharp_find_symbol, or a type name")] string? symbol = null,
+        [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
+        [Description("0-based line number, when locating by position")] int line = 0,
+        [Description("0-based character position, when locating by position")] int character = 0,
+        [Description("Only report derived types declared in this solution's source. Default true.")] bool sourceOnly = true,
+        [Description("Maximum derived types (default 100)")] int maxResults = 100,
+        CancellationToken cancellationToken = default)
+    {
+        return ToolBase.ExecuteAsync(logger, "csharp_type_hierarchy", async ct =>
+        {
+            var resolved = await SymbolResolver.ResolveArgumentsAsync(
+                workspace, symbol, filePath, line, character, null, ct);
+
+            if (resolved.Error is { } failure)
+                return failure;
+
+            if (resolved.Symbol is not INamedTypeSymbol type)
+                return $"Error: {resolved.Symbol!.ToDisplayString()} is a {resolved.Symbol.Kind}, not a type.";
+
+            return await DescribeHierarchyAsync(resolved.Solution!, type, sourceOnly, maxResults, ct);
+        }, cancellationToken);
+    }
+
+    internal static async Task<string> DescribeHierarchyAsync(
+        Solution solution, INamedTypeSymbol type, bool sourceOnly, int maxResults, CancellationToken ct)
+    {
+        type = type.OriginalDefinition;
+        var texts = new SourceTextCache(solution);
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Hierarchy of {type.ToDisplayString(SymbolFormatter.Signature)}");
+        if (SymbolResolver.IdFor(type) is { } typeId)
+            sb.AppendLine($"id: {typeId}");
+
+        // Above: the base chain from the root down to this type, so it reads like the tree below it.
+        var chain = new List<INamedTypeSymbol>();
+        for (var current = type.BaseType; current is not null; current = current.BaseType)
+            chain.Insert(0, current);
+
+        if (chain.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Base types:");
+            for (var i = 0; i < chain.Count; i++)
+                sb.AppendLine($"{new string(' ', 2 + i * 2)}{chain[i].ToDisplayString()}");
+            sb.AppendLine($"{new string(' ', 2 + chain.Count * 2)}{type.ToDisplayString()}   <- this type");
+        }
+
+        if (type.AllInterfaces.Length > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine("Interfaces:");
+            foreach (var iface in type.AllInterfaces.OrderBy(i => i.ToDisplayString(), StringComparer.Ordinal))
+            {
+                // An interface reached through a base type or another interface is worth flagging,
+                // since it is not on this type's own declaration.
+                var direct = type.Interfaces.Contains(iface, SymbolEqualityComparer.Default) ? "" : "   (inherited)";
+                sb.AppendLine($"  {iface.ToDisplayString()}{direct}");
+            }
+        }
+
+        // Below: every derived type, then each hung under its nearest ancestor in the result.
+        var derived = type.TypeKind == TypeKind.Interface
+            ? (await SymbolFinder.FindImplementationsAsync(type, solution, transitive: true, cancellationToken: ct))
+                .Concat(await SymbolFinder.FindDerivedInterfacesAsync(type, solution, transitive: true, cancellationToken: ct))
+            : await SymbolFinder.FindDerivedClassesAsync(type, solution, transitive: true, cancellationToken: ct);
+
+        var below = derived
+            .Select(d => d.OriginalDefinition)
+            .Where(d => !sourceOnly || d.Locations.Any(l => l.IsInSource))
+            .Distinct<INamedTypeSymbol>(SymbolEqualityComparer.Default)
+            .ToList();
+
+        sb.AppendLine();
+        if (below.Count == 0)
+        {
+            sb.AppendLine(type.IsSealed || type.TypeKind is TypeKind.Struct or TypeKind.Enum
+                ? "Derived types: none (sealed)."
+                : sourceOnly
+                    ? "Derived types: none in source. Pass sourceOnly=false to include referenced assemblies."
+                    : "Derived types: none.");
+            return sb.ToString();
+        }
+
+        var members = new HashSet<INamedTypeSymbol>(below, SymbolEqualityComparer.Default) { type };
+        var children = below.ToLookup(d => ParentOf(d, members, type), SymbolEqualityComparer.Default);
+
+        sb.AppendLine($"Derived types ({below.Count}):");
+        var shown = 0;
+        await AppendChildrenAsync(type, 1);
+
+        SymbolFormatter.AppendTruncationNote(sb, shown, below.Count, "derived type(s)");
+        return sb.ToString();
+
+        async Task AppendChildrenAsync(INamedTypeSymbol parent, int depth)
+        {
+            foreach (var child in children[parent].OrderBy(c => c.ToDisplayString(), StringComparer.Ordinal))
+            {
+                if (shown++ >= maxResults)
+                    return;
+
+                var indent = new string(' ', depth * 2);
+                sb.AppendLine($"{indent}{child.ToDisplayString()}");
+                if (child.Locations.FirstOrDefault(l => l.IsInSource) is { } location)
+                    SymbolFormatter.AppendLocationLine(sb, location, await texts.ForAsync(location, ct), indent + "    ");
+
+                await AppendChildrenAsync(child, depth + 1);
+            }
+        }
+    }
+
+    /// <summary>
+    /// The nearest ancestor of a derived type that is itself in the hierarchy: its base class when
+    /// that is in the set, otherwise the first of its own interfaces that is.
+    /// </summary>
+    private static INamedTypeSymbol ParentOf(
+        INamedTypeSymbol derived, HashSet<INamedTypeSymbol> members, INamedTypeSymbol root)
+    {
+        var candidates = new[] { derived.BaseType }.Concat(derived.Interfaces)
+            .OfType<INamedTypeSymbol>()
+            .Select(c => c.OriginalDefinition);
+
+        // A type reaching the root only through something filtered out of the set (a base class in
+        // a referenced assembly, say) still belongs under the root rather than vanishing.
+        return candidates.FirstOrDefault(members.Contains) ?? root;
+    }
+
     [McpServerTool(Name = "csharp_callers")]
     [Description("Find the methods that call a given method or access a given property or field, with the calling source line.")]
     public Task<string> CallersAsync(
