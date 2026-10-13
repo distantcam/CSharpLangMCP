@@ -163,7 +163,7 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
         {
             // Runs the generators, so this costs a compilation the first time per project.
             var generated = (await project.GetSourceGeneratedDocumentsAsync(ct))
-                .Select(d => (Document: d, Label: LabelFor(project, d)))
+                .Select(d => (Document: d, Label: LabelFor(d.FilePath, d.HintName)))
                 .Where(g => hintName is null || g.Label.Contains(hintName, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(g => g.Label, StringComparer.Ordinal)
                 .ToArray();
@@ -202,16 +202,29 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
     }
 
     /// <summary>
-    /// The workspace gives a generated document a virtual path of
-    /// <c>{projectDir}/{generatorAssembly}/{generatorType}/{hintName}</c>; the part after the project
-    /// directory names the generator as well as the file.
+    /// Labels a generated document <c>{generatorAssembly}/{generatorType}/{hintName}</c>.
     /// </summary>
-    private static string LabelFor(Project project, SourceGeneratedDocument document)
+    /// <remarks>
+    /// The workspace's virtual path for it ends in those three parts, but what comes before them
+    /// depends on the build layout - the project's obj folder, an artifacts folder, a custom
+    /// CompilerGeneratedFilesOutputPath - so only the tail is kept. The hint name is matched whole
+    /// because it may contain folders of its own.
+    /// </remarks>
+    internal static string LabelFor(string? filePath, string hintName)
     {
-        var projectDir = Path.GetDirectoryName(project.FilePath);
-        return document.FilePath is { } path && projectDir is not null
-            ? Path.GetRelativePath(projectDir, path).Replace('\\', '/')
-            : document.HintName;
+        var hint = hintName.Replace('\\', '/');
+        var path = filePath?.Replace('\\', '/');
+
+        if (path is null || !path.EndsWith("/" + hint, StringComparison.OrdinalIgnoreCase))
+            return hint;
+
+        var generatorDirectory = path[..^(hint.Length + 1)];
+        var generatorType = Path.GetFileName(generatorDirectory);
+        var generatorAssembly = Path.GetFileName(Path.GetDirectoryName(generatorDirectory));
+
+        return string.IsNullOrEmpty(generatorAssembly) || string.IsNullOrEmpty(generatorType)
+            ? hint
+            : $"{generatorAssembly}/{generatorType}/{hint}";
     }
 
     /// <summary>

@@ -48,6 +48,28 @@ public class GeneratedSourcesTests
         await Assert.That(result).Contains("probe[0-9]+");
     }
 
+    /// <summary>
+    /// The prefix before the generator varies with the build layout; the label must not. These are
+    /// the shapes seen in AutoCtor: an artifacts folder, and a per-Roslyn-version obj folder.
+    /// </summary>
+    [Test]
+    [Arguments(@"C:\repo\src\App\obj\Debug\net10.0\Gen\Gen.MyGenerator\Foo.g.cs")]
+    [Arguments(@"C:\repo\src\artifacts\obj\App\debug\Gen\Gen.MyGenerator\Foo.g.cs")]
+    [Arguments(@"C:\repo\src\App\obj\roslyn4.4\Gen\Gen.MyGenerator\Foo.g.cs")]
+    [Arguments("/repo/src/artifacts/obj/App/debug/Gen/Gen.MyGenerator/Foo.g.cs")]
+    public async Task LabelIsTheSameWhateverTheBuildLayout(string filePath)
+    {
+        await Assert.That(StructureTools.LabelFor(filePath, "Foo.g.cs")).IsEqualTo("Gen/Gen.MyGenerator/Foo.g.cs");
+    }
+
+    [Test]
+    public async Task HintNamesWithFoldersAreKeptWhole()
+    {
+        var label = StructureTools.LabelFor(@"C:\repo\obj\Gen\Gen.MyGenerator\Sub\Foo.g.cs", @"Sub\Foo.g.cs");
+
+        await Assert.That(label).IsEqualTo("Gen/Gen.MyGenerator/Sub/Foo.g.cs");
+    }
+
     [Test]
     public async Task SaysSoWhenNothingMatches()
     {
