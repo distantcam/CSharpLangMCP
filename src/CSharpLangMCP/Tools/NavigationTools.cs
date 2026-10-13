@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Text;
 using CSharpLangMCP.Roslyn;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Operations;
 using Microsoft.Extensions.Logging;
@@ -505,6 +506,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
         [Description("Only report callees declared in this solution's source, hiding BCL and package calls. Default false.")] bool sourceOnly = false,
+        [Description("Include reads and writes of auto-properties and positional record properties, which are field access in all but name. Turn off to see only calls that run code. Default true.")] bool includeAutoProperties = true,
         [Description("Maximum callees to return (default 100)")] int maxResults = 100,
         CancellationToken cancellationToken = default)
     {
@@ -516,12 +518,12 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
             if (resolved.Error is { } failure)
                 return failure;
 
-            return await DescribeCalleesAsync(resolved.Solution!, resolved.Symbol!, sourceOnly, maxResults, ct);
+            return await DescribeCalleesAsync(resolved.Solution!, resolved.Symbol!, sourceOnly, includeAutoProperties, maxResults, ct);
         }, cancellationToken);
     }
 
     internal static async Task<string> DescribeCalleesAsync(
-        Solution solution, ISymbol target, bool sourceOnly, int maxResults, CancellationToken ct)
+        Solution solution, ISymbol target, bool sourceOnly, bool includeAutoProperties, int maxResults, CancellationToken ct)
     {
         if (target.DeclaringSyntaxReferences.Length == 0)
             return $"Error: {target.ToDisplayString()} is declared in metadata, so it has no body here. Use csharp_decompile to read it.";
@@ -561,7 +563,10 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                     if (sourceOnly && !callee.Locations.Any(l => l.IsInSource))
                         continue;
 
-                    sites.Add((callee, operation.Syntax.GetLocation()));
+                    if (!includeAutoProperties && callee is IPropertySymbol calledProperty && IsAutoProperty(calledProperty))
+                        continue;
+
+                    sites.Add((callee, NameLocation(operation.Syntax)));
                 }
             }
         }
@@ -606,6 +611,33 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
         SymbolFormatter.AppendTruncationNote(sb, Math.Min(maxResults, grouped.Count), grouped.Count, "callee(s)");
         return sb.ToString();
     }
+
+    /// <summary>
+    /// Where to point at a call: the called member's own name rather than the start of the
+    /// expression, which for a chain like <c>a.B().C()</c> is the same <c>a</c> for every link.
+    /// </summary>
+    private static Location NameLocation(SyntaxNode syntax) => syntax switch
+    {
+        InvocationExpressionSyntax { Expression: var callee } => NameLocation(callee),
+        MemberAccessExpressionSyntax access => access.Name.GetLocation(),
+        MemberBindingExpressionSyntax binding => binding.Name.GetLocation(),
+        _ => syntax.GetLocation(),
+    };
+
+    /// <summary>
+    /// A source property with no hand-written accessor body: an auto-property or a positional
+    /// record property. Reading one runs no code of the caller's, so it is data access, not a call.
+    /// A property from metadata cannot be told apart and is never treated as one.
+    /// </summary>
+    private static bool IsAutoProperty(IPropertySymbol property) =>
+        property.DeclaringSyntaxReferences.Length > 0 &&
+        property.DeclaringSyntaxReferences.All(r => r.GetSyntax() switch
+        {
+            ParameterSyntax => true,
+            PropertyDeclarationSyntax { ExpressionBody: null, AccessorList: { } accessors } =>
+                accessors.Accessors.All(a => a.Body is null && a.ExpressionBody is null),
+            _ => false,
+        });
 
     /// <summary>
     /// The outermost nodes under a declaration that have an operation tree: a method's body, each
@@ -791,7 +823,7 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
         }
 
         // A positional record's properties are read by its synthesized Equals and Deconstruct.
-        if (symbol.DeclaringSyntaxReferences.Any(r => r.GetSyntax() is Microsoft.CodeAnalysis.CSharp.Syntax.ParameterSyntax))
+        if (symbol.DeclaringSyntaxReferences.Any(r => r.GetSyntax() is ParameterSyntax))
             return false;
 
         // Enum members are routinely reached through parsing and casts rather than by name.

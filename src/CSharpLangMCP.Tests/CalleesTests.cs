@@ -29,10 +29,14 @@ public class CalleesTests
             private static void Prepare() { }
 
             private static int Helper(int x) => x;
+
+            public int Size { get; set; }
+
+            public void Chain() => new System.Text.StringBuilder().Append(Size).Append(Count);
         }
         """;
 
-    private static async Task<string> DescribeAsync(string id, bool sourceOnly = false)
+    private static async Task<string> DescribeAsync(string id, bool sourceOnly = false, bool includeAutoProperties = true)
     {
         var (_, solution) = await WorkspaceFixture.GetAsync();
         var project = solution.Projects.First(p =>
@@ -42,7 +46,7 @@ public class CalleesTests
         project = project.AddDocument("CalleesProbe.cs", Probe).Project;
         var symbol = DocumentationCommentId.GetFirstSymbolForDeclarationId(id, (await project.GetCompilationAsync())!)!;
 
-        return await NavigationTools.DescribeCalleesAsync(project.Solution, symbol, sourceOnly, maxResults: 100, CancellationToken.None);
+        return await NavigationTools.DescribeCalleesAsync(project.Solution, symbol, sourceOnly, includeAutoProperties, maxResults: 100, CancellationToken.None);
     }
 
     [Test]
@@ -62,6 +66,32 @@ public class CalleesTests
         // Entries follow the body's order.
         await Assert.That(result.IndexOf("Prepare", StringComparison.Ordinal))
             .IsLessThan(result.IndexOf("Helper", StringComparison.Ordinal));
+    }
+
+    /// <summary>
+    /// Every link of a fluent chain starts at the same receiver; the site has to point at each
+    /// call's own name or the two Append calls are indistinguishable.
+    /// </summary>
+    [Test]
+    public async Task ChainedCallsPointAtTheirOwnNames()
+    {
+        var result = await DescribeAsync("M:CSharpLangMCP.Probe.Worker.Chain");
+
+        await Assert.That(result).Contains("CalleesProbe.cs:26:60");
+        await Assert.That(result).Contains("CalleesProbe.cs:26:73");
+    }
+
+    [Test]
+    public async Task AutoPropertiesCanBeHidden()
+    {
+        var all = await DescribeAsync("M:CSharpLangMCP.Probe.Worker.Chain");
+        await Assert.That(all).Contains("Worker.Size");
+
+        var calls = await DescribeAsync("M:CSharpLangMCP.Probe.Worker.Chain", includeAutoProperties: false);
+        await Assert.That(calls).DoesNotContain("Worker.Size");
+
+        // Count has an expression body that runs code, so it stays.
+        await Assert.That(calls).Contains("Worker.Count");
     }
 
     [Test]

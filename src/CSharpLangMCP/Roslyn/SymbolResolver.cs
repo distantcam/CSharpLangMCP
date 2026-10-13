@@ -79,7 +79,9 @@ internal static class SymbolResolver
 
             // Overloads and partial declarations of one symbol should not read as ambiguity.
             _ when DistinctById(candidates) is { Count: 1 } single => (single[0], null),
-            _ => (null, SymbolFormatter.FormatAmbiguity([.. candidates.Take(MaxCandidates)])),
+            // Deduplicated because a file compiled into several projects (a shared folder, a
+            // multi-targeted project) yields one identical symbol per compilation.
+            _ => (null, SymbolFormatter.FormatAmbiguity([.. DistinctById(candidates).Take(MaxCandidates)])),
         };
     }
 
@@ -216,11 +218,10 @@ internal static class SymbolResolver
     private static bool LooksLikeDocumentationId(string value) =>
         value.Length > 2 && value[1] == ':' && "NTMPFE".Contains(value[0], StringComparison.Ordinal);
 
-    private static List<ISymbol> DistinctById(IReadOnlyList<ISymbol> symbols) =>
+    /// <summary>One symbol per id, in first-seen order; a symbol without an id stands for itself.</summary>
+    internal static List<ISymbol> DistinctById(IReadOnlyList<ISymbol> symbols) =>
         symbols
-            .Select(IdFor)
-            .Where(id => id is not null)
-            .Distinct(StringComparer.Ordinal)
-            .Select(id => symbols.First(s => string.Equals(IdFor(s), id, StringComparison.Ordinal)))
+            .GroupBy(s => IdFor(s) ?? s.ToDisplayString(), StringComparer.Ordinal)
+            .Select(g => g.First())
             .ToList();
 }

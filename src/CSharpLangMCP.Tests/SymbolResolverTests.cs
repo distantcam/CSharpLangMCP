@@ -6,6 +6,30 @@ namespace CSharpLangMCP.Tests;
 
 public class SymbolResolverTests
 {
+    /// <summary>
+    /// A file compiled into two projects - a shared folder, or a multi-targeted project - yields one
+    /// identical symbol per compilation. The ambiguity list must name each overload once.
+    /// </summary>
+    [Test]
+    public async Task AmbiguityListsEachSymbolOnceAcrossProjects()
+    {
+        const string Shared = "class Dup { void Go() { } void Go(int x) { } }";
+
+        using var workspace = new AdhocWorkspace();
+        var solution = workspace.CurrentSolution;
+        foreach (var name in new[] { "First", "Second" })
+        {
+            var project = solution.AddProject(name, name, LanguageNames.CSharp);
+            solution = project.AddDocument("Dup.cs", SourceText.From(Shared)).Project.Solution;
+        }
+
+        var (symbol, error) = await SymbolResolver.ResolveAsync(solution, "Go", CancellationToken.None);
+
+        await Assert.That(symbol).IsNull();
+        await Assert.That(error).Contains("2 symbols match");
+        await Assert.That(error!.Split("id: M:Dup.Go(System.Int32)").Length - 1).IsEqualTo(1);
+    }
+
     [Test]
     public async Task ResolvesAPlainName()
     {
