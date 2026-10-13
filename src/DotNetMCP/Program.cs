@@ -44,7 +44,8 @@ try
         .WithTools<NavigationTools>()
         .WithTools<StructureTools>()
         .WithTools<EditTools>()
-        .WithTools<CodeActionTools>();
+        .WithTools<CodeActionTools>()
+        .WithTools<DecompileTools>();
 
     var app = builder.Build();
     await app.RunAsync();

@@ -218,7 +218,7 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
     /// Resolves a type by metadata name first, then by a source declaration search, so both
     /// 'System.Collections.Generic.List`1' and a bare 'SymbolResolver' work.
     /// </summary>
-    private static async Task<INamedTypeSymbol?> FindTypeAsync(Solution solution, string typeName, CancellationToken ct)
+    internal static async Task<INamedTypeSymbol?> FindTypeAsync(Solution solution, string typeName, CancellationToken ct)
     {
         foreach (var project in solution.Projects)
         {
