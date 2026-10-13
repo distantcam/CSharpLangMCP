@@ -130,6 +130,90 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
         }, cancellationToken);
     }
 
+    [McpServerTool(Name = "csharp_generated_sources")]
+    [Description("List or read the C# files source generators produce. These exist only in the compilation, never on disk, so this is the only way to see them. Omit hintName to list; pass it to read the matching files.")]
+    public Task<string> GeneratedSourcesAsync(
+        [Description("Restrict to one project by name (default: all projects)")] string? projectName = null,
+        [Description("Read the generated files whose hint name or generator path contains this text, e.g. 'MyType.g.cs' (omit to list)")] string? hintName = null,
+        CancellationToken cancellationToken = default)
+    {
+        return ToolBase.ExecuteAsync(logger, "csharp_generated_sources", async ct =>
+        {
+            var solution = await workspace.GetSolutionAsync(null, overlay: null, ct);
+
+            var projects = solution.Projects
+                .Where(p => projectName is null || string.Equals(p.Name, projectName, StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+
+            if (projects.Length == 0)
+                return $"Error: No project named '{projectName}'. Loaded: {string.Join(", ", solution.Projects.Select(p => p.Name))}";
+
+            return await DescribeGeneratedSourcesAsync(projects, hintName, ct);
+        }, cancellationToken);
+    }
+
+    /// <summary>Lists generated documents, or prints those matching <paramref name="hintName"/>.</summary>
+    internal static async Task<string> DescribeGeneratedSourcesAsync(
+        IEnumerable<Project> projects, string? hintName, CancellationToken ct)
+    {
+        var sb = new StringBuilder();
+        var found = 0;
+
+        foreach (var project in projects.OrderBy(p => p.Name, StringComparer.Ordinal))
+        {
+            // Runs the generators, so this costs a compilation the first time per project.
+            var generated = (await project.GetSourceGeneratedDocumentsAsync(ct))
+                .Select(d => (Document: d, Label: LabelFor(project, d)))
+                .Where(g => hintName is null || g.Label.Contains(hintName, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(g => g.Label, StringComparer.Ordinal)
+                .ToArray();
+
+            if (generated.Length == 0)
+                continue;
+
+            if (hintName is null)
+                sb.AppendLine($"{project.Name} ({generated.Length}):");
+
+            foreach (var (document, label) in generated)
+            {
+                var text = await document.GetTextAsync(ct);
+                found++;
+
+                if (hintName is null)
+                {
+                    sb.AppendLine($"  {label}   ({text.Lines.Count} lines)");
+                    continue;
+                }
+
+                sb.AppendLine($"// {project.Name}: {label}");
+                sb.AppendLine(text.ToString());
+                sb.AppendLine();
+            }
+        }
+
+        if (found == 0)
+        {
+            return hintName is null
+                ? "No source generators produced output in the selected project(s)."
+                : $"No generated file matches '{hintName}'. Omit hintName to list them.";
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// The workspace gives a generated document a virtual path of
+    /// <c>{projectDir}/{generatorAssembly}/{generatorType}/{hintName}</c>; the part after the project
+    /// directory names the generator as well as the file.
+    /// </summary>
+    private static string LabelFor(Project project, SourceGeneratedDocument document)
+    {
+        var projectDir = Path.GetDirectoryName(project.FilePath);
+        return document.FilePath is { } path && projectDir is not null
+            ? Path.GetRelativePath(projectDir, path).Replace('\\', '/')
+            : document.HintName;
+    }
+
     /// <summary>
     /// Resolves a type by metadata name first, then by a source declaration search, so both
     /// 'System.Collections.Generic.List`1' and a bare 'SymbolResolver' work.

@@ -103,6 +103,7 @@ By default this is the compiler alone, which is fast but is **not** what `dotnet
 |---|---|
 | `csharp_outline` | The declarations in a file as a nested outline. |
 | `csharp_type_members` | Members of any type, including ones from referenced assemblies such as the BCL or a NuGet package. |
+| `csharp_generated_sources` | List the files source generators produce, or read them by passing `hintName`. They exist only in memory, so this is the only way to see them without building. |
 
 ### Code actions
 
