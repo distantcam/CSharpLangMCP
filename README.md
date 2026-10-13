@@ -1,8 +1,8 @@
-# DotNetMCP
+# CSharpLangMCP
 
 An MCP server that exposes C# semantic analysis — diagnostics, symbol search, navigation, references, type inspection and rename — as MCP tools, built directly on [Roslyn](https://github.com/dotnet/roslyn).
 
-Communicates over **stdio**. Advertised server name: `dotnet-mcp`.
+Communicates over **stdio**. Advertised server name: `csharplang-mcp`.
 
 ## Prerequisites
 
@@ -13,22 +13,22 @@ Roslyn evaluates project files through its own out-of-process MSBuild build host
 ## Install
 
 ```bash
-dotnet tool install -g DotNetMCP
+dotnet tool install -g CSharpLangMCP
 ```
 
-The command is `dotnet-mcp`. Nothing to unzip, no absolute paths, and no second runtime to install — the SDK is already a prerequisite, so anything that can run this server already has `dotnet`.
+The command is `csharplang-mcp`. Nothing to unzip, no absolute paths, and no second runtime to install — the SDK is already a prerequisite, so anything that can run this server already has `dotnet`.
 
 ## Build
 
 ```bash
-dotnet pack src/DotNetMCP/DotNetMCP.csproj -c Release
+dotnet pack src/CSharpLangMCP/CSharpLangMCP.csproj -c Release
 ```
 
-Output: `src\artifacts\package\release\DotNetMCP.0.1.0.nupkg`. To try it before publishing:
+Output: `src\artifacts\package\release\CSharpLangMCP.0.1.0.nupkg`. To try it before publishing:
 
 ```bash
-dotnet tool install -g DotNetMCP --add-source src/artifacts/package/release
-dotnet tool uninstall -g DotNetMCP
+dotnet tool install -g CSharpLangMCP --add-source src/artifacts/package/release
+dotnet tool uninstall -g CSharpLangMCP
 ```
 
 The package is a RID-less, framework-dependent .NET tool, so one `.nupkg` covers every platform. It carries the `BuildHost-net472\` and `BuildHost-netcore\` folders beside the assembly, which is where Roslyn looks for them — it evaluates project files by launching one of them as a separate process.
@@ -36,7 +36,7 @@ The package is a RID-less, framework-dependent .NET tool, so one `.nupkg` covers
 ## Tests
 
 ```bash
-dotnet run --project src/DotNetMCP.Tests/DotNetMCP.Tests.csproj
+dotnet run --project src/CSharpLangMCP.Tests/CSharpLangMCP.Tests.csproj
 ```
 
 TUnit builds the test project as an executable, so running it directly is the native path. `dotnet test` needs the .NET 10 Microsoft.Testing.Platform opt-in in `global.json` and is not wired up here.
@@ -48,7 +48,7 @@ The tests load this repository as their own fixture, so they exercise the real s
 ### Claude Code
 
 ```bash
-claude mcp add dotnet -- dotnet-mcp
+claude mcp add csharplang -- csharplang-mcp
 ```
 
 ### Claude Desktop
@@ -58,8 +58,8 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json` (create it if it does not exi
 ```json
 {
   "mcpServers": {
-    "dotnet": {
-      "command": "dotnet-mcp",
+    "csharplang": {
+      "command": "csharplang-mcp",
       "args": []
     }
   }
@@ -75,9 +75,9 @@ Then **fully quit Claude Desktop from the system tray** and relaunch. Closing th
 ```json
 {
   "mcpServers": {
-    "dotnet": {
+    "csharplang": {
       "command": "dnx",
-      "args": ["DotNetMCP", "--yes"]
+      "args": ["CSharpLangMCP", "--yes"]
     }
   }
 }
@@ -95,7 +95,7 @@ Positions are **0-based on input** and 1-based in the output.
 
 Most tools take a `symbol` argument rather than a file position. It accepts either:
 
-- an **id** as returned by `csharp_find_symbol`, e.g. `M:DotNetMCP.Roslyn.SymbolResolver.ResolveAsync(Microsoft.CodeAnalysis.Solution,System.String,System.Threading.CancellationToken)` — exact and unambiguous; or
+- an **id** as returned by `csharp_find_symbol`, e.g. `M:CSharpLangMCP.Roslyn.SymbolResolver.ResolveAsync(Microsoft.CodeAnalysis.Solution,System.String,System.Threading.CancellationToken)` — exact and unambiguous; or
 - a **name**, plain or partially qualified: `ResolveAsync`, or `SymbolResolver.ResolveAsync` to narrow it.
 
 If a name matches several symbols, the tool returns the candidates with their ids instead of guessing. Every tool also accepts `filePath` + `line` + `character` as a fallback.

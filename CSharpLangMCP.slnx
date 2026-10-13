@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+    <File Path="README.md" />
+    <File Path="src/Directory.Build.props" />
+    <File Path="src/Directory.Packages.props" />
+    <File Path="src/global.json" />
+  </Folder>
+  <Project Path="src/CSharpLangMCP/CSharpLangMCP.csproj" />
+  <Project Path="src/CSharpLangMCP.Tests/CSharpLangMCP.Tests.csproj" />
+</Solution>
