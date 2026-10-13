@@ -627,6 +627,226 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
         }
     }
 
+    [McpServerTool(Name = "csharp_unused_symbols")]
+    [Description("Find types and members that nothing in the solution references - candidates for deletion. Skips what is reached without a direct reference: overrides, interface implementations, constructors, entry points and anything carrying an attribute. Reflection, serialization and DI can still use what this reports, so verify before deleting.")]
+    public Task<string> UnusedSymbolsAsync(
+        [Description("'solution', a project name, or an absolute path to a .cs file to check only the symbols declared there")] string scope = "solution",
+        [Description("Also check public symbols. Off by default, since another assembly may use them; turn on for an application nothing else references.")] bool includePublic = false,
+        [Description("Maximum symbols to return (default 100)")] int maxResults = 100,
+        CancellationToken cancellationToken = default)
+    {
+        return ToolBase.ExecuteAsync(logger, "csharp_unused_symbols", async ct =>
+        {
+            var isFile = scope.EndsWith(".cs", StringComparison.OrdinalIgnoreCase);
+            var solution = await workspace.GetSolutionAsync(isFile ? scope : null, overlay: null, ct);
+
+            return await DescribeUnusedAsync(solution, scope, includePublic, maxResults, ct);
+        }, cancellationToken);
+    }
+
+    internal static async Task<string> DescribeUnusedAsync(
+        Solution solution, string scope, bool includePublic, int maxResults, CancellationToken ct)
+    {
+        string? onlyFile = null;
+        Project[] projects;
+
+        if (scope.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            if (RoslynWorkspaceService.FindDocument(solution, scope) is not { } document)
+                return $"Error: File is not part of the loaded workspace: {scope}";
+
+            onlyFile = document.FilePath;
+            projects = [document.Project];
+        }
+        else if (scope.Equals("solution", StringComparison.OrdinalIgnoreCase))
+        {
+            projects = [.. solution.Projects];
+        }
+        else
+        {
+            projects = [.. solution.Projects.Where(p => string.Equals(p.Name, scope, StringComparison.OrdinalIgnoreCase))];
+            if (projects.Length == 0)
+                return $"Error: No project named '{scope}'. Loaded: {string.Join(", ", solution.Projects.Select(p => p.Name))}";
+        }
+
+        var unused = new List<ISymbol>();
+        var seen = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var project in projects)
+        {
+            var compilation = await project.GetCompilationAsync(ct);
+            if (compilation is null)
+                continue;
+
+            var entryPoint = compilation.GetEntryPoint(ct);
+
+            foreach (var type in SourceTypes(compilation.Assembly.GlobalNamespace))
+            {
+                ct.ThrowIfCancellationRequested();
+
+                // Only hand-written declarations: generator output is regenerated, not deleted.
+                if (!type.DeclaringSyntaxReferences.Any(r => solution.GetDocument(r.SyntaxTree) is not null))
+                    continue;
+
+                if (onlyFile is not null && !type.Locations.Any(l => RoslynWorkspaceService.PathComparer.Equals(l.SourceTree?.FilePath, onlyFile)))
+                    continue;
+
+                if (IsCandidate(type, includePublic, entryPoint) && !await IsReferencedAsync(type, solution, ct))
+                {
+                    // A dead type's members are dead with it; listing them too is just noise.
+                    if (seen.Add(SymbolResolver.IdFor(type) ?? type.ToDisplayString()))
+                        unused.Add(type);
+                    continue;
+                }
+
+                foreach (var member in type.GetMembers())
+                {
+                    if (onlyFile is not null && !member.Locations.Any(l => RoslynWorkspaceService.PathComparer.Equals(l.SourceTree?.FilePath, onlyFile)))
+                        continue;
+
+                    if (IsCandidate(member, includePublic, entryPoint) &&
+                        !await IsReferencedAsync(member, solution, ct) &&
+                        seen.Add(SymbolResolver.IdFor(member) ?? member.ToDisplayString()))
+                    {
+                        unused.Add(member);
+                    }
+                }
+            }
+        }
+
+        var description = onlyFile ?? (projects.Length == 1 ? projects[0].Name : "the solution");
+        if (unused.Count == 0)
+            return $"No unreferenced symbols found in {description}.";
+
+        var texts = new SourceTextCache(solution);
+        var sb = new StringBuilder();
+        sb.AppendLine($"{unused.Count} unreferenced symbol(s) in {description}. Reflection, serialization and DI can use code without a reference - verify before deleting.");
+        sb.AppendLine();
+
+        foreach (var symbol in unused
+            .OrderBy(s => s.Locations[0].SourceTree?.FilePath, StringComparer.Ordinal)
+            .ThenBy(s => s.Locations[0].SourceSpan.Start)
+            .Take(maxResults))
+        {
+            SymbolFormatter.AppendSymbolLine(sb, symbol);
+            var location = symbol.Locations.First(l => l.IsInSource);
+            SymbolFormatter.AppendLocationLine(sb, location, await texts.ForAsync(location, ct), "    ");
+        }
+
+        SymbolFormatter.AppendTruncationNote(sb, Math.Min(maxResults, unused.Count), unused.Count, "symbol(s)");
+        return sb.ToString();
+    }
+
+    private static IEnumerable<INamedTypeSymbol> SourceTypes(INamespaceSymbol ns)
+    {
+        foreach (var member in ns.GetMembers())
+        {
+            if (member is INamespaceSymbol child)
+            {
+                foreach (var type in SourceTypes(child))
+                    yield return type;
+            }
+            else if (member is INamedTypeSymbol type && type.Locations.Any(l => l.IsInSource))
+            {
+                yield return type;
+
+                foreach (var nested in NestedTypes(type))
+                    yield return nested;
+            }
+        }
+
+        static IEnumerable<INamedTypeSymbol> NestedTypes(INamedTypeSymbol type) =>
+            type.GetTypeMembers().SelectMany(t => NestedTypes(t).Prepend(t));
+    }
+
+    /// <summary>
+    /// Whether a symbol could be dead at all: something reached only through a direct reference.
+    /// Everything excluded here is called by the runtime, the compiler or a framework instead.
+    /// </summary>
+    private static bool IsCandidate(ISymbol symbol, bool includePublic, IMethodSymbol? entryPoint)
+    {
+        if (symbol.IsImplicitlyDeclared || symbol.IsOverride || symbol.IsExtern)
+            return false;
+
+        if (!includePublic && EffectiveAccessibility(symbol) is Accessibility.Public or Accessibility.Protected or Accessibility.ProtectedOrInternal)
+            return false;
+
+        // [Test], [McpServerTool], [JsonConstructor], [DllImport]...: an attribute is how most
+        // frameworks find the code they call, so an attributed symbol is not this tool's to judge.
+        if (symbol.GetAttributes().Length > 0)
+            return false;
+
+        switch (symbol)
+        {
+            case IMethodSymbol method:
+                if (method.MethodKind != MethodKind.Ordinary || SymbolEqualityComparer.Default.Equals(method, entryPoint))
+                    return false;
+                break;
+
+            case IPropertySymbol or IFieldSymbol or IEventSymbol or INamedTypeSymbol:
+                break;
+
+            default:
+                return false;
+        }
+
+        // A positional record's properties are read by its synthesized Equals and Deconstruct.
+        if (symbol.DeclaringSyntaxReferences.Any(r => r.GetSyntax() is Microsoft.CodeAnalysis.CSharp.Syntax.ParameterSyntax))
+            return false;
+
+        // Enum members are routinely reached through parsing and casts rather than by name.
+        if (symbol is IFieldSymbol { ContainingType.TypeKind: TypeKind.Enum })
+            return false;
+
+        return !ImplementsInterfaceMember(symbol);
+    }
+
+    private static bool ImplementsInterfaceMember(ISymbol symbol)
+    {
+        if (symbol is IMethodSymbol { ExplicitInterfaceImplementations.Length: > 0 }
+            or IPropertySymbol { ExplicitInterfaceImplementations.Length: > 0 }
+            or IEventSymbol { ExplicitInterfaceImplementations.Length: > 0 })
+        {
+            return true;
+        }
+
+        var type = symbol.ContainingType;
+        return type is not null && type.AllInterfaces
+            .SelectMany(i => i.GetMembers())
+            .Any(m => SymbolEqualityComparer.Default.Equals(type.FindImplementationForInterfaceMember(m), symbol));
+    }
+
+    /// <summary>A member's real reach: a public member of an internal type is internal.</summary>
+    private static Accessibility EffectiveAccessibility(ISymbol symbol)
+    {
+        var result = symbol.DeclaredAccessibility;
+        for (var container = symbol.ContainingType; container is not null; container = container.ContainingType)
+        {
+            if (container.DeclaredAccessibility < result)
+                result = container.DeclaredAccessibility;
+        }
+
+        return result;
+    }
+
+    /// <summary>Whether anything outside the symbol's own declaration refers to it.</summary>
+    private static async Task<bool> IsReferencedAsync(ISymbol symbol, Solution solution, CancellationToken ct)
+    {
+        var declarations = symbol.DeclaringSyntaxReferences;
+
+        foreach (var reference in await SymbolFinder.FindReferencesAsync(symbol, solution, ct))
+        {
+            // A recursive call, or a type naming itself, is not a use from outside.
+            if (reference.Locations.Any(l => !declarations.Any(d =>
+                d.SyntaxTree == l.Location.SourceTree && d.Span.Contains(l.Location.SourceSpan))))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     /// <summary>
     /// Turns a kind name into a filter. Every name the tool documents is a member of either
     /// <see cref="TypeKind"/> (Class, Struct, Interface, Enum) or <see cref="SymbolKind"/> (Method,

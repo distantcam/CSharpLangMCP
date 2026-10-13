@@ -126,6 +126,7 @@ By default this is the compiler alone, which is fast but is **not** what `dotnet
 | `csharp_type_hierarchy` | A type's base class chain and interfaces above it, and the tree of derived and implementing types below it, in one call. |
 | `csharp_callers` | The methods that call a method or access a property or field. |
 | `csharp_callees` | The reverse: what a method, constructor or property calls, in body order, including inside lambdas and local functions. `sourceOnly=true` hides BCL and package calls. |
+| `csharp_unused_symbols` | Types and members nothing references, for a solution, project or file. Skips overrides, interface implementations, constructors, entry points and attributed symbols; public symbols only with `includePublic=true`. |
 
 ### Structure
 
