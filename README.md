@@ -162,7 +162,7 @@ The editing and code action tools **preview by default** and write only when pas
 
 - **Cold start.** The first workspace load takes a few seconds on a small solution and considerably longer on a large one. It happens on the first tool call if you did not call `csharp_load_workspace` yourself.
 - **Memory.** A large solution can hold well over a gigabyte. `csharp_unload_workspace` releases it.
-- **Staleness.** Files edited on disk are picked up automatically on the next tool call. Changes to *project* files are not — reload the workspace with `csharp_load_workspace`.
+- **Staleness.** Files edited on disk are picked up automatically on the next tool call. Adding or deleting a `.cs` file, or editing a solution, project or `Directory.*.props`/`.targets` file, triggers an automatic reload on the next call, which costs as much as the first load.
 - **Analyzer cost.** `includeAnalyzers=true` is off by default because it is not free: a file-scoped call is scoped to that one syntax tree, but a solution-scoped run asks all ~400 analyzers about every project. On this repository that is about a second; on a large solution it is the difference between a quick answer and a slow one, so name a project rather than `solution` where you can.
 - **Unsaved buffers.** Tools that take a `content` argument analyze that text instead of what is on disk.
 

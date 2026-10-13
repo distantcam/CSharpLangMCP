@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.IO.Enumeration;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
 using Microsoft.CodeAnalysis.Text;
@@ -26,8 +27,14 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
     private Solution? _solution;
     private string? _loadedPath;
 
+    /// <summary>What the solution's shape was built from, as of the last load; see <see cref="Shape"/>.</summary>
+    private Shape? _shape;
+
     internal static StringComparer PathComparer { get; } =
         OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+
+    private static StringComparison PathComparison { get; } =
+        OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
 
     public bool IsLoaded => _solution is not null;
 
@@ -65,6 +72,7 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
             _solution = solution;
             _loadedPath = resolved;
             _diskStamps.Clear();
+            _shape = Shape.Capture(solution, resolved);
 
             var projects = solution.Projects
                 .Select(p => new ProjectSummary(p.Name, p.Documents.Count(), TargetFrameworkOf(p)))
@@ -112,6 +120,13 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
 
             logger.LogInformation("No workspace loaded; discovered {Path}", discovered);
             await LoadAsync(discovered, ct);
+        }
+        else if (_shape is { } shape && _loadedPath is { } loaded && !shape.IsCurrent(_solution))
+        {
+            // A source file came or went, or a project or build file changed. Working out which
+            // project a new file belongs to means evaluating MSBuild's globs, which is a reload.
+            logger.LogInformation("Project structure changed on disk; reloading {Path}", loaded);
+            await LoadAsync(loaded, ct);
         }
 
         var solution = await SyncChangedDocumentsAsync(ct);
@@ -185,8 +200,10 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
         _solution = _workspace.CurrentSolution;
 
         // Applied edits move the files under us; drop stamps so the next sync does not re-read them
-        // as though an external editor had done it.
+        // as though an external editor had done it. A code action that adds a file has already put
+        // it in the solution, so the shape is re-captured rather than triggering a reload.
         _diskStamps.Clear();
+        _shape = Shape.Capture(_solution, _loadedPath!);
         return true;
     }
 
@@ -215,7 +232,106 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
         _workspace = null;
         _solution = null;
         _loadedPath = null;
+        _shape = null;
         _diskStamps.Clear();
+    }
+
+    /// <summary>
+    /// The on-disk inputs that decide which documents and options a solution has: the source files
+    /// under each project directory, and the write times of the solution, project and
+    /// Directory.*.props/targets files.
+    /// </summary>
+    /// <remarks>
+    /// Compared against disk rather than against the solution's documents, so a file a project
+    /// deliberately excludes is part of the baseline and does not trigger a reload on every call.
+    /// </remarks>
+    private sealed class Shape
+    {
+        private static readonly string[] BuildFileNames =
+            ["Directory.Build.props", "Directory.Build.targets", "Directory.Packages.props"];
+
+        private readonly HashSet<string> _sources;
+        private readonly Dictionary<string, DateTime> _buildFiles;
+
+        private Shape(HashSet<string> sources, Dictionary<string, DateTime> buildFiles) =>
+            (_sources, _buildFiles) = (sources, buildFiles);
+
+        public static Shape Capture(Solution solution, string loadedPath)
+        {
+            var buildFiles = new Dictionary<string, DateTime>(PathComparer);
+
+            // A missing file stamps as 1601-01-01, so creating one - a new Directory.Build.props
+            // above a project, say - reads as a change too.
+            foreach (var path in BuildFilesOf(solution, loadedPath))
+                buildFiles[path] = File.GetLastWriteTimeUtc(path);
+
+            return new Shape(SourcesUnder(ProjectDirectories(solution)), buildFiles);
+        }
+
+        public bool IsCurrent(Solution solution) =>
+            _buildFiles.All(f => File.GetLastWriteTimeUtc(f.Key) == f.Value) &&
+            _sources.SetEquals(SourcesUnder(ProjectDirectories(solution)));
+
+        private static IEnumerable<string> BuildFilesOf(Solution solution, string loadedPath)
+        {
+            yield return loadedPath;
+
+            foreach (var project in solution.Projects)
+            {
+                if (project.FilePath is not { } projectFile)
+                    continue;
+
+                yield return projectFile;
+
+                // MSBuild imports the nearest of each of these walking up from the project.
+                for (var directory = Path.GetDirectoryName(projectFile); directory is not null; directory = Path.GetDirectoryName(directory))
+                {
+                    foreach (var name in BuildFileNames)
+                        yield return Path.Combine(directory, name);
+                }
+            }
+        }
+
+        /// <summary>Project directories, minus any nested inside another, since those are walked already.</summary>
+        private static List<string> ProjectDirectories(Solution solution)
+        {
+            var directories = solution.Projects
+                .Select(p => Path.GetDirectoryName(p.FilePath))
+                .OfType<string>()
+                .Distinct(PathComparer)
+                .OrderBy(d => d.Length)
+                .ToList();
+
+            return directories
+                .Where(d => !directories.Any(outer =>
+                    outer.Length < d.Length &&
+                    d.StartsWith(outer.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, PathComparison)))
+                .ToList();
+        }
+
+        private static HashSet<string> SourcesUnder(IEnumerable<string> directories)
+        {
+            var options = new EnumerationOptions { RecurseSubdirectories = true, IgnoreInaccessible = true };
+            var sources = new HashSet<string>(PathComparer);
+
+            foreach (var directory in directories.Where(Directory.Exists))
+            {
+                var files = new FileSystemEnumerable<string>(directory, (ref entry) => entry.ToFullPath(), options)
+                {
+                    ShouldIncludePredicate = (ref entry) =>
+                        !entry.IsDirectory && entry.FileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase),
+
+                    // Build output churns on every build and is never hand-written source; dot
+                    // directories are .git, .vs and the like.
+                    ShouldRecursePredicate = (ref entry) =>
+                        entry.FileName is not ("bin" or "obj") && !entry.FileName.StartsWith('.'),
+                };
+
+                sources.UnionWith(files);
+            }
+
+            return sources;
+        }
     }
 
     private static string? TargetFrameworkOf(Project project)
