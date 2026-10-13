@@ -219,7 +219,7 @@ internal static class SymbolResolver
         value.Length > 2 && value[1] == ':' && "NTMPFE".Contains(value[0], StringComparison.Ordinal);
 
     /// <summary>One symbol per id, in first-seen order; a symbol without an id stands for itself.</summary>
-    internal static List<ISymbol> DistinctById(IReadOnlyList<ISymbol> symbols) =>
+    private static List<ISymbol> DistinctById(IReadOnlyList<ISymbol> symbols) =>
         symbols
             .GroupBy(s => IdFor(s) ?? s.ToDisplayString(), StringComparer.Ordinal)
             .Select(g => g.First())
