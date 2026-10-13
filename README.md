@@ -10,15 +10,28 @@ The **.NET 10 SDK**. Nothing else — no language server to install separately.
 
 Roslyn evaluates project files through its own out-of-process MSBuild build host, which is why the SDK is required at runtime and not just to build.
 
+## Install
+
+```bash
+dotnet tool install -g DotNetMCP
+```
+
+The command is `dotnet-mcp`. Nothing to unzip, no absolute paths, and no second runtime to install — the SDK is already a prerequisite, so anything that can run this server already has `dotnet`.
+
 ## Build
 
 ```bash
-dotnet publish src/DotNetMCP/DotNetMCP.csproj -c Release -r win-x64 -o dist
+dotnet pack src/DotNetMCP/DotNetMCP.csproj -c Release
 ```
 
-Output: `dist\DotNetMCP.exe` — a single-file build with every dependency bundled in — plus the `BuildHost-net472\` and `BuildHost-netcore\` folders. **Those two folders have to travel with the exe.** Roslyn evaluates project files by launching one of them as a separate process, so they cannot live inside the bundle; it looks for them next to the executable.
+Output: `src\artifacts\package\release\DotNetMCP.0.1.0.nupkg`. To try it before publishing:
 
-Single-file publish requires a runtime identifier; swap `win-x64` for `linux-x64` or `osx-arm64` elsewhere. The build stays framework-dependent — the .NET 10 SDK is a runtime prerequisite regardless, so bundling a private runtime would only add ~70 MB.
+```bash
+dotnet tool install -g DotNetMCP --add-source src/artifacts/package/release
+dotnet tool uninstall -g DotNetMCP
+```
+
+The package is a RID-less, framework-dependent .NET tool, so one `.nupkg` covers every platform. It carries the `BuildHost-net472\` and `BuildHost-netcore\` folders beside the assembly, which is where Roslyn looks for them — it evaluates project files by launching one of them as a separate process.
 
 ## Tests
 
@@ -35,7 +48,7 @@ The tests load this repository as their own fixture, so they exercise the real s
 ### Claude Code
 
 ```bash
-claude mcp add dotnet -- path/to/DotNetMCP.exe
+claude mcp add dotnet -- dotnet-mcp
 ```
 
 ### Claude Desktop
@@ -46,16 +59,31 @@ Edit `%APPDATA%\Claude\claude_desktop_config.json` (create it if it does not exi
 {
   "mcpServers": {
     "dotnet": {
-      "command": "C:\\src\\ai\\DotNetMCP\\dist\\DotNetMCP.exe",
+      "command": "dotnet-mcp",
       "args": []
     }
   }
 }
 ```
 
-The path must be absolute, and backslashes must be doubled — JSON escaping.
-
 Then **fully quit Claude Desktop from the system tray** and relaunch. Closing the window leaves the process running, and the server will not be reloaded.
+
+### Without installing
+
+`dnx` runs a NuGet tool straight from the feed, the way `npx` does:
+
+```json
+{
+  "mcpServers": {
+    "dotnet": {
+      "command": "dnx",
+      "args": ["DotNetMCP", "--yes"]
+    }
+  }
+}
+```
+
+First launch downloads the package, so expect that call to be slower.
 
 ## Tools
 
@@ -145,4 +173,4 @@ For more detail, raise the log level from `Warning` to `Debug`:
 "args": ["--verbose"]
 ```
 
-Quit Claude Desktop before re-running `dotnet publish` — while the server is running, Desktop holds a lock on the files in `dist\` and the publish will fail.
+Quit Claude Desktop before reinstalling the tool — while the server is running, Desktop holds a lock on the installed files and the install will fail.

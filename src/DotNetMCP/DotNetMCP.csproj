@@ -3,36 +3,25 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
-
-    <!-- Publish as one exe. The BuildHost-* folders stay loose beside it: Roslyn starts
-         them as separate processes, so they cannot live inside the bundle. -->
-    <PublishSingleFile>true</PublishSingleFile>
-    <SelfContained>false</SelfContained>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
-    <EnableSingleFileAnalyzer>true</EnableSingleFileAnalyzer>
+
+    <!-- Ships as a .NET tool: `dotnet tool install -g DotNetMCP`, or `dnx DotNetMCP` to run
+         without installing. The SDK is a runtime prerequisite anyway (Roslyn evaluates project
+         files through its out-of-process MSBuild build host), so everyone who can run this
+         already has `dotnet`. -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>dotnet-mcp</ToolCommandName>
+    <PackageId>DotNetMCP</PackageId>
+    <Version>0.1.0</Version>
+    <Description>An MCP server exposing C# semantic analysis — diagnostics, symbol search, navigation, references, type inspection and rename — built on Roslyn.</Description>
+    <PackageTags>mcp;roslyn;csharp;model-context-protocol</PackageTags>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
     <InternalsVisibleTo Include="DotNetMCP.Tests" />
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
-
-  <!--
-    Roslyn starts a BuildHost-* payload as its own process, locating it by path next to this
-    assembly. The single-file bundler treats every .dll/.exe it is handed as bundle content, so
-    without this it swallows those payloads and leaves the folders with nothing to run.
-    Runs between _HandleFileConflictsForPublish and _ComputeFilesToBundle, which is where the
-    publish list is final and the bundler has not yet partitioned it.
-  -->
-  <Target Name="KeepBuildHostBesideSingleFile"
-          AfterTargets="_HandleFileConflictsForPublish"
-          Condition="'$(PublishSingleFile)' == 'true'">
-    <ItemGroup>
-      <_BuildHostPublishFile Include="@(ResolvedFileToPublish)"
-                             Condition="$([System.String]::new('%(ResolvedFileToPublish.RelativePath)').StartsWith('BuildHost-'))" />
-      <ResolvedFileToPublish Remove="@(_BuildHostPublishFile)" />
-      <ResolvedFileToPublish Include="@(_BuildHostPublishFile)" ExcludeFromSingleFile="true" />
-    </ItemGroup>
-  </Target>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
