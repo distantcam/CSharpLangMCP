@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text;
 using CSharpLangMCP.Roslyn;
 using Microsoft.CodeAnalysis;
@@ -17,7 +17,9 @@ public sealed class CodeActionTools(
     AnalyzerService analyzers)
 {
     [McpServerTool(Name = "csharp_code_actions")]
-    [Description("List the quick fixes and refactorings available at a position or over a line range - the same actions an IDE lightbulb offers. Apply one with csharp_apply_code_action.")]
+    [Description(
+        "List the quick fixes and refactorings available at a position or over a line range - the same actions an "
+        + "IDE lightbulb offers. Apply one with csharp_apply_code_action.")]
     public Task<string> CodeActionsAsync(
         [Description("Absolute path to the C# file")] string filePath,
         [Description("0-based start line")] int startLine,
@@ -25,14 +27,29 @@ public sealed class CodeActionTools(
         [Description("0-based start character. Defaults to the start of the line.")] int? startCharacter = null,
         [Description("0-based end character. Defaults to the end of the end line.")] int? endCharacter = null,
         [Description("Include quick fixes for diagnostics (default true)")] bool includeFixes = true,
-        [Description("Include refactorings (default true). These are the slower half of the call.")] bool includeRefactorings = true,
-        [Description("Also consider the project's analyzer diagnostics, which is what makes the IDExxxx fixes (add braces, use expression body, remove unnecessary usings) available. Off by default because running the analyzers costs a second or two. CAxxxx diagnostics are reported by csharp_diagnostics but their fixers are not bundled, so no fix appears for them here.")] bool includeAnalyzers = false,
+        [Description(
+            "Include refactorings (default true). These are the slower half of the call.")]
+        bool includeRefactorings = true,
+        [Description(
+            "Also consider the project's analyzer diagnostics, which is what makes the IDExxxx fixes (add braces, "
+            + "use expression body, remove unnecessary usings) available. Off by default because running the "
+            + "analyzers costs a second or two. CAxxxx diagnostics are reported by csharp_diagnostics but their "
+            + "fixers are not bundled, so no fix appears for them here.")]
+        bool includeAnalyzers = false,
         [Description("Unsaved file content (reads from disk if omitted)")] string? content = null,
         CancellationToken cancellationToken = default)
     {
         return ToolBase.ExecuteAsync(logger, "csharp_code_actions", async ct =>
         {
-            var located = await LocateAsync(filePath, startLine, endLine, startCharacter, endCharacter, includeAnalyzers, content, ct);
+            var located = await LocateAsync(
+                filePath,
+                startLine,
+                endLine,
+                startCharacter,
+                endCharacter,
+                includeAnalyzers,
+                content,
+                ct);
             if (located.Error is { } error)
                 return error;
 
@@ -54,11 +71,15 @@ public sealed class CodeActionTools(
                 if (!includeRefactorings)
                     sb.AppendLine("Refactorings were excluded - re-run with includeRefactorings=true to see more.");
                 if (!includeAnalyzers)
-                    sb.AppendLine("Analyzer diagnostics were not considered - re-run with includeAnalyzers=true to see their fixes.");
+                {
+                    sb.AppendLine(
+                        "Analyzer diagnostics were not considered - re-run with includeAnalyzers=true to see their fixes.");
+                }
                 return sb.ToString();
             }
 
-            sb.AppendLine($"{actions.Count} code action(s). Apply one by passing its exact title to csharp_apply_code_action:");
+            sb.AppendLine(
+                $"{actions.Count} code action(s). Apply one by passing its exact title to csharp_apply_code_action:");
 
             foreach (var group in actions.GroupBy(a => a.Kind))
             {
@@ -80,7 +101,9 @@ public sealed class CodeActionTools(
     }
 
     [McpServerTool(Name = "csharp_apply_code_action")]
-    [Description("Apply a code action offered by csharp_code_actions, identified by its exact title. Previews the edits by default; pass apply=true to write them.")]
+    [Description(
+        "Apply a code action offered by csharp_code_actions, identified by its exact title. Previews the edits by "
+        + "default; pass apply=true to write them.")]
     public Task<string> ApplyCodeActionAsync(
         [Description("Absolute path to the C# file")] string filePath,
         [Description("Exact title as listed by csharp_code_actions")] string title,
@@ -89,7 +112,10 @@ public sealed class CodeActionTools(
         [Description("0-based start character. Defaults to the start of the line.")] int? startCharacter = null,
         [Description("0-based end character. Defaults to the end of the end line.")] int? endCharacter = null,
         [Description("Write the changes to disk. Default false, which only previews them.")] bool apply = false,
-        [Description("Must match the csharp_code_actions call. Required to apply a fix for an analyzer diagnostic (CAxxxx, IDExxxx).")] bool includeAnalyzers = false,
+        [Description(
+            "Must match the csharp_code_actions call. Required to apply a fix for an analyzer diagnostic (CAxxxx, "
+            + "IDExxxx).")]
+        bool includeAnalyzers = false,
         [Description("Unsaved file content (reads from disk if omitted)")] string? content = null,
         CancellationToken cancellationToken = default)
     {
@@ -98,7 +124,15 @@ public sealed class CodeActionTools(
             if (string.IsNullOrWhiteSpace(title))
                 return "Error: title must not be empty.";
 
-            var located = await LocateAsync(filePath, startLine, endLine, startCharacter, endCharacter, includeAnalyzers, content, ct);
+            var located = await LocateAsync(
+                filePath,
+                startLine,
+                endLine,
+                startCharacter,
+                endCharacter,
+                includeAnalyzers,
+                content,
+                ct);
             if (located.Error is { } error)
                 return error;
 
@@ -146,7 +180,8 @@ public sealed class CodeActionTools(
     /// Diagnostics are computed fresh rather than read from a cache: a fix offered against a stale
     /// diagnostic either fails to apply or silently does the wrong thing.
     /// </remarks>
-    private async Task<(Document? Document, TextSpan Span, IReadOnlyList<Diagnostic>? Diagnostics, string? Error)> LocateAsync(
+    private async Task<(Document? Document, TextSpan Span, IReadOnlyList<Diagnostic>? Diagnostics, string? Error)>
+        LocateAsync(
         string filePath, int startLine, int? endLine, int? startCharacter, int? endCharacter,
         bool includeAnalyzers, string? content, CancellationToken ct)
     {
@@ -173,7 +208,10 @@ public sealed class CodeActionTools(
         else
         {
             if (lastLine >= text.Lines.Count)
-                return (null, default, null, $"Error: Line {lastLine + 1} is past the end of the file ({text.Lines.Count} line(s)).");
+            {
+                return (null, default, null,
+                    $"Error: Line {lastLine + 1} is past the end of the file ({text.Lines.Count} line(s)).");
+            }
 
             end = text.Lines[lastLine].End;
         }
@@ -196,8 +234,8 @@ public sealed class CodeActionTools(
     }
 
     /// <summary>Code edits are ordinary source, so they read best flattened to one quoted line.</summary>
-    private static string DescribeEdit(SourceText text, TextChange change) =>
-        ChangePreview.DescribeEdit(text, change, static value =>
+    private static string DescribeEdit(SourceText text, TextChange change)
+        => ChangePreview.DescribeEdit(text, change, static value =>
         {
             var flattened = value.ReplaceLineEndings(" ").Trim();
             return flattened.Length == 0 ? "" : $"\"{SymbolFormatter.Truncate(flattened, 100)}\"";

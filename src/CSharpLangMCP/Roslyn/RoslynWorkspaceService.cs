@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using System.IO.Enumeration;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.MSBuild;
@@ -253,8 +253,8 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
         private readonly HashSet<string> _sources;
         private readonly Dictionary<string, DateTime> _buildFiles;
 
-        private Shape(HashSet<string> sources, Dictionary<string, DateTime> buildFiles) =>
-            (_sources, _buildFiles) = (sources, buildFiles);
+        private Shape(HashSet<string> sources, Dictionary<string, DateTime> buildFiles)
+            => (_sources, _buildFiles) = (sources, buildFiles);
 
         public static Shape Capture(Solution solution, string loadedPath)
         {
@@ -268,8 +268,8 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
             return new Shape(SourcesUnder(ProjectDirectories(solution)), buildFiles);
         }
 
-        public bool IsCurrent(Solution solution) =>
-            _buildFiles.All(f => File.GetLastWriteTimeUtc(f.Key) == f.Value) &&
+        public bool IsCurrent(Solution solution)
+            => _buildFiles.All(f => File.GetLastWriteTimeUtc(f.Key) == f.Value) &&
             _sources.SetEquals(SourcesUnder(ProjectDirectories(solution)));
 
         private static IEnumerable<string> BuildFilesOf(Solution solution, string loadedPath)
@@ -284,7 +284,10 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
                 yield return projectFile;
 
                 // MSBuild imports the nearest of each of these walking up from the project.
-                for (var directory = Path.GetDirectoryName(projectFile); directory is not null; directory = Path.GetDirectoryName(directory))
+                for (
+                    var directory = Path.GetDirectoryName(projectFile);
+                    directory is not null;
+                    directory = Path.GetDirectoryName(directory))
                 {
                     foreach (var name in BuildFileNames)
                         yield return Path.Combine(directory, name);
@@ -305,7 +308,9 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
             return directories
                 .Where(d => !directories.Any(outer =>
                     outer.Length < d.Length &&
-                    d.StartsWith(outer.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, PathComparison)))
+                    d.StartsWith(
+                        outer.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar,
+                        PathComparison)))
                 .ToList();
         }
 
@@ -342,8 +347,8 @@ public sealed class RoslynWorkspaceService(ILogger<RoslynWorkspaceService> logge
         return open >= 0 && name.EndsWith(')') ? name[(open + 1)..^1] : null;
     }
 
-    private static bool IsProjectFile(string path) =>
-        Path.GetExtension(path).Equals(".csproj", StringComparison.OrdinalIgnoreCase);
+    private static bool IsProjectFile(string path)
+        => Path.GetExtension(path).Equals(".csproj", StringComparison.OrdinalIgnoreCase);
 
     private static readonly string[] WorkspaceExtensions = [".slnx", ".sln", ".slnf", ".csproj"];
 

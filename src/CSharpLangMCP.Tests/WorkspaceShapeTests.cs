@@ -1,4 +1,4 @@
-using CSharpLangMCP.Roslyn;
+﻿using CSharpLangMCP.Roslyn;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -40,7 +40,8 @@ public class WorkspaceShapeTests
 
             // An excluded file is in the baseline, so it must not read as a change on every call.
             var unchanged = await service.GetSolutionAsync(null, overlay: null, CancellationToken.None);
-            await Assert.That(await service.GetSolutionAsync(null, overlay: null, CancellationToken.None)).IsSameReferenceAs(unchanged);
+            await Assert.That(await service.GetSolutionAsync(null, overlay: null, CancellationToken.None))
+                .IsSameReferenceAs(unchanged);
 
             await File.WriteAllTextAsync(Path.Combine(directory, "B.cs"), "class B;");
             await Assert.That(await DocumentNamesAsync(service)).IsEquivalentTo(["A.cs", "B.cs"]);
@@ -71,7 +72,8 @@ public class WorkspaceShapeTests
         return
         [
             .. solution.Projects.Single().Documents
-                .Where(d => d.Folders.Count == 0 && !d.Name.Contains(".g.", StringComparison.Ordinal) && !d.Name.Contains("AssemblyInfo", StringComparison.Ordinal))
+                .Where(d => d.Folders.Count == 0 && !d.Name.Contains(".g.", StringComparison.Ordinal)
+                    && !d.Name.Contains("AssemblyInfo", StringComparison.Ordinal))
                 .Select(d => d.Name)
                 .Order(StringComparer.Ordinal)
         ];

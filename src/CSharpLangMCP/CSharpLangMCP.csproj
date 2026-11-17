@@ -4,7 +4,9 @@
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+  </PropertyGroup>
 
+  <PropertyGroup>
     <!-- Ships as a .NET tool: `dotnet tool install -g CSharpLangMCP`, or `dnx CSharpLangMCP` to run
          without installing. The SDK is a runtime prerequisite anyway (Roslyn evaluates project
          files through its out-of-process MSBuild build host), so everyone who can run this
@@ -12,7 +14,7 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>csharplang-mcp</ToolCommandName>
     <PackageId>CSharpLangMCP</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.0.0</Version>
     <Description>An MCP server exposing C# semantic analysis — diagnostics, symbol search, navigation, references, type inspection and rename — built on Roslyn.</Description>
     <PackageTags>mcp;roslyn;csharp;model-context-protocol</PackageTags>
     <PackageReadmeFile>README.md</PackageReadmeFile>
@@ -24,10 +26,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="ICSharpCode.Decompiler" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" />
     <PackageReference Include="Microsoft.CodeAnalysis.Workspaces.MSBuild" />
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Features" />
-    <PackageReference Include="ICSharpCode.Decompiler" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" />
     <PackageReference Include="ModelContextProtocol" />

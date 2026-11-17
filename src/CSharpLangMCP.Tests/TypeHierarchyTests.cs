@@ -1,4 +1,4 @@
-using CSharpLangMCP.Tools;
+﻿using CSharpLangMCP.Tools;
 using Microsoft.CodeAnalysis;
 
 namespace CSharpLangMCP.Tests;
@@ -27,7 +27,12 @@ public class TypeHierarchyTests
         project = project.AddDocument("HierarchyProbe.cs", Probe).Project;
         var type = (await project.GetCompilationAsync())!.GetTypeByMetadataName("CSharpLangMCP.Probe." + typeName)!;
 
-        return await NavigationTools.DescribeHierarchyAsync(project.Solution, type, sourceOnly: true, maxResults: 100, CancellationToken.None);
+        return await NavigationTools.DescribeHierarchyAsync(
+            project.Solution,
+            type,
+            sourceOnly: true,
+            maxResults: 100,
+            CancellationToken.None);
     }
 
     /// <summary>Lines with their indentation, so tree shape can be asserted on.</summary>

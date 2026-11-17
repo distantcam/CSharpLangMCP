@@ -1,4 +1,4 @@
-using CSharpLangMCP.Tools;
+﻿using CSharpLangMCP.Tools;
 using Microsoft.CodeAnalysis;
 
 namespace CSharpLangMCP.Tests;
@@ -36,7 +36,10 @@ public class CalleesTests
         }
         """;
 
-    private static async Task<string> DescribeAsync(string id, bool sourceOnly = false, bool includeAutoProperties = true)
+    private static async Task<string> DescribeAsync(
+        string id,
+        bool sourceOnly = false,
+        bool includeAutoProperties = true)
     {
         var (_, solution) = await WorkspaceFixture.GetAsync();
         var project = solution.Projects.First(p =>
@@ -46,7 +49,13 @@ public class CalleesTests
         project = project.AddDocument("CalleesProbe.cs", Probe).Project;
         var symbol = DocumentationCommentId.GetFirstSymbolForDeclarationId(id, (await project.GetCompilationAsync())!)!;
 
-        return await NavigationTools.DescribeCalleesAsync(project.Solution, symbol, sourceOnly, includeAutoProperties, maxResults: 100, CancellationToken.None);
+        return await NavigationTools.DescribeCalleesAsync(
+            project.Solution,
+            symbol,
+            sourceOnly,
+            includeAutoProperties,
+            maxResults: 100,
+            CancellationToken.None);
     }
 
     [Test]

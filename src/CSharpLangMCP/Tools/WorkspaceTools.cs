@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text;
 using CSharpLangMCP.Roslyn;
 using Microsoft.CodeAnalysis;
@@ -15,7 +15,10 @@ public sealed class WorkspaceTools(
     AnalyzerService analyzers)
 {
     [McpServerTool(Name = "csharp_load_workspace")]
-    [Description("Load a C# solution or project for analysis. Accepts a directory, or a path to a .slnx, .sln, .slnf or .csproj file. Other tools load this automatically if they can find a workspace, but calling this first is faster and reports load problems.")]
+    [Description(
+        "Load a C# solution or project for analysis. Accepts a directory, or a path to a .slnx, .sln, .slnf or "
+        + ".csproj file. Other tools load this automatically if they can find a workspace, but calling this first "
+        + "is faster and reports load problems.")]
     public Task<string> LoadWorkspaceAsync(
         [Description("Directory, or path to a .slnx / .sln / .slnf / .csproj file")] string path,
         CancellationToken cancellationToken = default)
@@ -38,11 +41,16 @@ public sealed class WorkspaceTools(
             if (result.Failures.Count > 0)
             {
                 sb.AppendLine();
-                sb.AppendLine($"{result.Failures.Count} load warning(s) - these projects were skipped, the rest loaded fine:");
+                sb.AppendLine(
+                    $"{result.Failures.Count} load warning(s) - these projects were skipped, the rest loaded fine:");
                 foreach (var failure in result.Failures.Take(20))
                     sb.AppendLine($"  {SymbolFormatter.Truncate(failure, 300)}");
 
-                SymbolFormatter.AppendTruncationNote(sb, Math.Min(20, result.Failures.Count), result.Failures.Count, "warning(s)");
+                SymbolFormatter.AppendTruncationNote(
+                    sb,
+                    Math.Min(20, result.Failures.Count),
+                    result.Failures.Count,
+                    "warning(s)");
             }
 
             if (result.Projects.Count == 0)
@@ -53,7 +61,9 @@ public sealed class WorkspaceTools(
     }
 
     [McpServerTool(Name = "csharp_unload_workspace")]
-    [Description("Unload the workspace and release memory and file handles. Roslyn memory-maps referenced assemblies, so call this before rebuilding the solution if a build reports locked files.")]
+    [Description(
+        "Unload the workspace and release memory and file handles. Roslyn memory-maps referenced assemblies, so "
+        + "call this before rebuilding the solution if a build reports locked files.")]
     public Task<string> UnloadWorkspaceAsync(CancellationToken cancellationToken = default)
     {
         return ToolBase.ExecuteAsync(logger, "csharp_unload_workspace", ct =>
@@ -69,11 +79,21 @@ public sealed class WorkspaceTools(
     }
 
     [McpServerTool(Name = "csharp_diagnostics")]
-    [Description("Get compiler errors and warnings. Scope can be 'solution', a project name, or an absolute path to a .cs file. Each diagnostic includes the offending source line. Pass includeAnalyzers=true to also run the project's analyzers and match what a build reports.")]
+    [Description(
+        "Get compiler errors and warnings. Scope can be 'solution', a project name, or an absolute path to a .cs "
+        + "file. Each diagnostic includes the offending source line. Pass includeAnalyzers=true to also run the "
+        + "project's analyzers and match what a build reports.")]
     public Task<string> GetDiagnosticsAsync(
         [Description("'solution', a project name, or an absolute path to a .cs file")] string scope = "solution",
-        [Description("Lowest severity to report: Error, Warning, Info or Hidden. Default Warning.")] string minimumSeverity = "Warning",
-        [Description("Also run the project's configured analyzers (CAxxxx, IDExxxx), so the result matches what a build reports rather than the compiler alone. Off by default because it costs real time on a large solution; prefer naming a project over 'solution'. A project setting TreatWarningsAsErrors reports analyzer warnings as errors here, exactly as its build does.")] bool includeAnalyzers = false,
+        [Description(
+            "Lowest severity to report: Error, Warning, Info or Hidden. Default Warning.")]
+        string minimumSeverity = "Warning",
+        [Description(
+            "Also run the project's configured analyzers (CAxxxx, IDExxxx), so the result matches what a build "
+            + "reports rather than the compiler alone. Off by default because it costs real time on a large "
+            + "solution; prefer naming a project over 'solution'. A project setting TreatWarningsAsErrors reports "
+            + "analyzer warnings as errors here, exactly as its build does.")]
+        bool includeAnalyzers = false,
         [Description("Unsaved file content, used only when scope is a file path")] string? content = null,
         [Description("Maximum diagnostics to return (default 100)")] int maxResults = 100,
         CancellationToken cancellationToken = default)
@@ -105,7 +125,8 @@ public sealed class WorkspaceTools(
             {
                 return includeAnalyzers
                     ? $"No diagnostics at or above {floor} in {description}."
-                    : $"No compiler diagnostics at or above {floor} in {description}. Analyzers were not run; pass includeAnalyzers=true to match what a build reports.";
+                    : $"No compiler diagnostics at or above {floor} in {description}. Analyzers were not run; "
+                        + "pass includeAnalyzers=true to match what a build reports.";
             }
 
             var errors = filtered.Count(d => d.Severity == DiagnosticSeverity.Error);
@@ -114,7 +135,8 @@ public sealed class WorkspaceTools(
 
             // Worth saying out loud: a clean compiler-only result is not the same as a clean build.
             if (!includeAnalyzers)
-                sb.AppendLine("Compiler diagnostics only - pass includeAnalyzers=true to also run the project's analyzers.");
+                sb.AppendLine(
+                    "Compiler diagnostics only - pass includeAnalyzers=true to also run the project's analyzers.");
 
             sb.AppendLine();
 
@@ -122,12 +144,20 @@ public sealed class WorkspaceTools(
 
             foreach (var diagnostic in filtered.Take(maxResults))
             {
-                sb.AppendLine($"[{diagnostic.Severity.ToString().ToUpperInvariant()}] {diagnostic.Id}: {diagnostic.GetMessage()}");
-                SymbolFormatter.AppendLocationLine(sb, diagnostic.Location, await texts.ForAsync(diagnostic.Location, ct));
+                sb.AppendLine(
+                    $"[{diagnostic.Severity.ToString().ToUpperInvariant()}] {diagnostic.Id}: {diagnostic.GetMessage()}");
+                SymbolFormatter.AppendLocationLine(
+                    sb,
+                    diagnostic.Location,
+                    await texts.ForAsync(diagnostic.Location, ct));
                 sb.AppendLine();
             }
 
-            SymbolFormatter.AppendTruncationNote(sb, Math.Min(maxResults, filtered.Length), filtered.Length, "diagnostic(s)");
+            SymbolFormatter.AppendTruncationNote(
+                sb,
+                Math.Min(maxResults, filtered.Length),
+                filtered.Length,
+                "diagnostic(s)");
             return sb.ToString();
         }, cancellationToken);
     }
@@ -165,11 +195,14 @@ public sealed class WorkspaceTools(
             : solution.Projects.Where(p =>
                 p.Name.Equals(scope, StringComparison.OrdinalIgnoreCase) ||
                 // Multi-targeted projects are named "Foo(net10.0)"; match the bare name too.
-                p.Name.StartsWith(scope + "(", StringComparison.OrdinalIgnoreCase)).ToArray();
+                p.Name.StartsWith(scope + "(", StringComparison.OrdinalIgnoreCase))
+                .ToArray();
 
         if (projects.Length == 0)
         {
-            var names = string.Join(", ", solution.Projects.Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal));
+            var names = string.Join(
+                ", ",
+                solution.Projects.Select(p => p.Name).OrderBy(n => n, StringComparer.Ordinal));
             return (null, $"Error: No project named '{scope}'. Loaded projects: {names}");
         }
 

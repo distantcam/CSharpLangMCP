@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Runtime.InteropServices;
 using CSharpLangMCP.Roslyn;
 using ICSharpCode.Decompiler;
@@ -17,10 +17,16 @@ namespace CSharpLangMCP.Tools;
 public sealed class DecompileTools(ILogger<DecompileTools> logger, RoslynWorkspaceService workspace)
 {
     [McpServerTool(Name = "csharp_decompile")]
-    [Description("Decompile a type or member from a referenced assembly (BCL, NuGet package) back to C#, to see how it is implemented. For signatures and documentation alone, csharp_symbol_info is cheaper.")]
+    [Description(
+        "Decompile a type or member from a referenced assembly (BCL, NuGet package) back to C#, to see how it is "
+        + "implemented. For signatures and documentation alone, csharp_symbol_info is cheaper.")]
     public Task<string> DecompileAsync(
-        [Description("Symbol id like 'M:System.String.Join(System.String,System.String[])', or a type name like 'System.Collections.Generic.List`1'. Omit to use filePath/line/character instead.")] string? symbol = null,
-        [Description("Absolute path to a .cs file where the symbol is used, when locating by position")] string? filePath = null,
+        [Description(
+            "Symbol id like 'M:System.String.Join(System.String,System.String[])', or a type name like "
+            + "'System.Collections.Generic.List`1'. Omit to use filePath/line/character instead.")]
+        string? symbol = null,
+        [Description(
+            "Absolute path to a .cs file where the symbol is used, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
         CancellationToken cancellationToken = default)
@@ -70,11 +76,13 @@ public sealed class DecompileTools(ILogger<DecompileTools> logger, RoslynWorkspa
             if (File.Exists(implementation))
             {
                 path = implementation;
-                note = $"// {assembly.Name} is a reference assembly; decompiled from the .NET {Environment.Version} runtime instead.\n";
+                note = $"// {assembly.Name} is a reference assembly; decompiled from the .NET "
+                    + $"{Environment.Version} runtime instead.\n";
             }
             else
             {
-                note = $"// {assembly.Name} is a reference assembly and no implementation was found: method bodies are stubs.\n";
+                note = $"// {assembly.Name} is a reference assembly and no implementation was found: "
+                    + "method bodies are stubs.\n";
             }
         }
 
@@ -109,17 +117,21 @@ public sealed class DecompileTools(ILogger<DecompileTools> logger, RoslynWorkspa
             ?? members.FirstOrDefault(m => WithoutReturnType(IdStringProvider.GetIdString(m)) == WithoutReturnType(id));
 
         return member is null
-            ? header + $"// {id} was not matched; showing the whole type.\n" + decompiler.DecompileTypeAsString(typeName)
+            ? header + $"// {id} was not matched; showing the whole type.\n"
+                + decompiler.DecompileTypeAsString(typeName)
             : header + decompiler.DecompileAsString(member.MetadataToken);
     }
 
-    private static CSharpDecompiler CreateDecompiler(string path) =>
-        new(path, new DecompilerSettings { ThrowOnAssemblyResolveErrors = false });
+    private static CSharpDecompiler CreateDecompiler(string path)
+        => new(path, new DecompilerSettings { ThrowOnAssemblyResolveErrors = false });
 
-    private static string? WithoutReturnType(string? id) =>
-        id?.IndexOf('~', StringComparison.Ordinal) is >= 0 and var tilde ? id[..tilde] : id;
+    private static string? WithoutReturnType(string? id)
+        => id?.IndexOf('~', StringComparison.Ordinal) is >= 0 and var tilde ? id[..tilde] : id;
 
-    private static async Task<string?> FindAssemblyPathAsync(Solution solution, IAssemblySymbol assembly, CancellationToken ct)
+    private static async Task<string?> FindAssemblyPathAsync(
+        Solution solution,
+        IAssemblySymbol assembly,
+        CancellationToken ct)
     {
         foreach (var project in solution.Projects)
         {
@@ -131,13 +143,13 @@ public sealed class DecompileTools(ILogger<DecompileTools> logger, RoslynWorkspa
         return null;
     }
 
-    private static bool IsReferenceAssembly(IAssemblySymbol assembly) =>
-        assembly.GetAttributes().Any(a =>
+    private static bool IsReferenceAssembly(IAssemblySymbol assembly)
+        => assembly.GetAttributes().Any(a =>
             a.AttributeClass?.ToDisplayString() == "System.Runtime.CompilerServices.ReferenceAssemblyAttribute");
 
     /// <summary>The reflection name ILSpy expects: <c>Ns.Outer+Inner`1</c>.</summary>
-    private static string MetadataNameOf(INamedTypeSymbol type) =>
-        type.ContainingType is { } outer
+    private static string MetadataNameOf(INamedTypeSymbol type)
+        => type.ContainingType is { } outer
             ? MetadataNameOf(outer) + "+" + type.MetadataName
             : type.ContainingNamespace is { IsGlobalNamespace: false } ns
                 ? ns.ToDisplayString() + "." + type.MetadataName

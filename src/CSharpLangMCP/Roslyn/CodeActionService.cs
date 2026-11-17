@@ -1,4 +1,4 @@
-using System.Composition.Hosting;
+﻿using System.Composition.Hosting;
 using System.Reflection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CodeActions;
@@ -42,14 +42,14 @@ public enum CodeActionKind
 public sealed class CodeActionService(ILogger<CodeActionService> logger)
 {
     /// <summary>Assemblies carrying the built-in providers.</summary>
-    private static readonly string[] FeatureAssemblyNames =
+    private static readonly string[] s_featureAssemblyNames =
     [
         "Microsoft.CodeAnalysis.Features",
         "Microsoft.CodeAnalysis.CSharp.Features",
     ];
 
     /// <summary>Guards against a pathological provider dragging a whole tool call down.</summary>
-    private static readonly TimeSpan PerProviderBudget = TimeSpan.FromSeconds(10);
+    private static readonly TimeSpan s_perProviderBudget = TimeSpan.FromSeconds(10);
 
     /// <summary>How deep to expand nested action groups.</summary>
     private const int MaxNestingDepth = 3;
@@ -63,7 +63,7 @@ public sealed class CodeActionService(ILogger<CodeActionService> logger)
 
     private static (CodeFixProvider[] Fixes, CodeRefactoringProvider[] Refactorings) Compose(ILogger logger)
     {
-        var assemblies = FeatureAssemblyNames.Select(Assembly.Load).ToArray();
+        var assemblies = s_featureAssemblyNames.Select(Assembly.Load).ToArray();
         var container = new ContainerConfiguration().WithAssemblies(assemblies).CreateContainer();
 
         CodeFixProvider[] fixes = [.. container.GetExports<CodeFixProvider>()
@@ -71,7 +71,9 @@ public sealed class CodeActionService(ILogger<CodeActionService> logger)
             .OrderBy(p => p.GetType().FullName, StringComparer.Ordinal)];
 
         CodeRefactoringProvider[] refactorings = [.. container.GetExports<CodeRefactoringProvider>()
-            .Where(p => SupportsCSharp(p.GetType().GetCustomAttribute<ExportCodeRefactoringProviderAttribute>()?.Languages))
+            .Where(
+                p => SupportsCSharp(
+                    p.GetType().GetCustomAttribute<ExportCodeRefactoringProviderAttribute>()?.Languages))
             .OrderBy(p => p.GetType().FullName, StringComparer.Ordinal)];
 
         logger.LogInformation(
@@ -106,7 +108,14 @@ public sealed class CodeActionService(ILogger<CodeActionService> logger)
                     var context = new CodeFixContext(document, diagnostic, (action, _) => actions.Add(action), ct);
 
                     if (await RunProviderAsync(provider, () => provider.RegisterCodeFixesAsync(context), ct))
-                        Flatten(collected, actions, CodeActionKind.Fix, diagnostic.Id, ProviderName(provider), prefix: null, depth: 0);
+                        Flatten(
+                            collected,
+                            actions,
+                            CodeActionKind.Fix,
+                            diagnostic.Id,
+                            ProviderName(provider),
+                            prefix: null,
+                            depth: 0);
                 }
             }
         }
@@ -119,7 +128,14 @@ public sealed class CodeActionService(ILogger<CodeActionService> logger)
                 var context = new CodeRefactoringContext(document, span, actions.Add, ct);
 
                 if (await RunProviderAsync(provider, () => provider.ComputeRefactoringsAsync(context), ct))
-                    Flatten(collected, actions, CodeActionKind.Refactoring, null, ProviderName(provider), prefix: null, depth: 0);
+                    Flatten(
+                        collected,
+                        actions,
+                        CodeActionKind.Refactoring,
+                        null,
+                        ProviderName(provider),
+                        prefix: null,
+                        depth: 0);
             }
         }
 
@@ -184,7 +200,7 @@ public sealed class CodeActionService(ILogger<CodeActionService> logger)
     private async Task<bool> RunProviderAsync(object provider, Func<Task> run, CancellationToken ct)
     {
         using var budget = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        budget.CancelAfter(PerProviderBudget);
+        budget.CancelAfter(s_perProviderBudget);
 
         try
         {
@@ -202,8 +218,8 @@ public sealed class CodeActionService(ILogger<CodeActionService> logger)
         }
     }
 
-    private static bool SupportsCSharp(string[]? languages) =>
-        languages is null || languages.Contains(LanguageNames.CSharp);
+    private static bool SupportsCSharp(string[]? languages)
+        => languages is null || languages.Contains(LanguageNames.CSharp);
 
     private static string ProviderName(object provider)
     {

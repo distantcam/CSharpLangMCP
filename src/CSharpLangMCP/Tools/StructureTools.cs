@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text;
 using CSharpLangMCP.Roslyn;
 using Microsoft.CodeAnalysis;
@@ -14,7 +14,9 @@ namespace CSharpLangMCP.Tools;
 public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspaceService workspace)
 {
     [McpServerTool(Name = "csharp_outline")]
-    [Description("List the declarations in a C# file as a nested outline - types, methods, properties, fields and events, with their signatures and line numbers.")]
+    [Description(
+        "List the declarations in a C# file as a nested outline - types, methods, properties, fields and events, "
+        + "with their signatures and line numbers.")]
     public Task<string> OutlineAsync(
         [Description("Absolute path to the C# file")] string filePath,
         [Description("Unsaved file content (reads from disk if omitted)")] string? content = null,
@@ -49,9 +51,14 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
     }
 
     [McpServerTool(Name = "csharp_type_members")]
-    [Description("List the members of a type, including types from referenced assemblies such as the BCL or a NuGet package. Use this instead of guessing what an API offers.")]
+    [Description(
+        "List the members of a type, including types from referenced assemblies such as the BCL or a NuGet "
+        + "package. Use this instead of guessing what an API offers.")]
     public Task<string> TypeMembersAsync(
-        [Description("Type name: 'SymbolResolver', 'CSharpLangMCP.Roslyn.RoslynWorkspaceService', or a metadata name like 'System.Collections.Generic.List`1'")] string typeName,
+        [Description(
+            "Type name: 'SymbolResolver', 'CSharpLangMCP.Roslyn.RoslynWorkspaceService', or a metadata name like "
+            + "'System.Collections.Generic.List`1'")]
+        string typeName,
         [Description("Include members inherited from base types (default false)")] bool includeInherited = false,
         [Description("Include non-public members (default false)")] bool includeNonPublic = false,
         [Description("Maximum members to return (default 200)")] int maxResults = 200,
@@ -79,7 +86,11 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
                 .Where(m => includeNonPublic || m.Member.DeclaredAccessibility == Accessibility.Public)
                 // Compiler-generated accessors and backing fields are noise in a member listing.
                 .Where(m => !m.Member.IsImplicitlyDeclared)
-                .Where(m => m.Member is not IMethodSymbol { MethodKind: MethodKind.PropertyGet or MethodKind.PropertySet or MethodKind.EventAdd or MethodKind.EventRemove })
+                .Where(m => m.Member is not IMethodSymbol
+                {
+                    MethodKind: MethodKind.PropertyGet or MethodKind.PropertySet
+                        or MethodKind.EventAdd or MethodKind.EventRemove,
+                })
                 .ToList();
 
             var sb = new StringBuilder();
@@ -91,7 +102,10 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
             if (type.BaseType is { SpecialType: not SpecialType.System_Object } baseType)
                 sb.AppendLine($"Base: {baseType.ToDisplayString(SymbolFormatter.Member)}");
             if (type.Interfaces.Length > 0)
-                sb.AppendLine($"Implements: {string.Join(", ", type.Interfaces.Select(i => i.ToDisplayString(SymbolFormatter.Member)))}");
+            {
+                var interfaces = type.Interfaces.Select(i => i.ToDisplayString(SymbolFormatter.Member));
+                sb.AppendLine($"Implements: {string.Join(", ", interfaces)}");
+            }
 
             sb.AppendLine();
 
@@ -131,10 +145,15 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
     }
 
     [McpServerTool(Name = "csharp_generated_sources")]
-    [Description("List or read the C# files source generators produce. These exist only in the compilation, never on disk, so this is the only way to see them. Omit hintName to list; pass it to read the matching files.")]
+    [Description(
+        "List or read the C# files source generators produce. These exist only in the compilation, never on disk, "
+        + "so this is the only way to see them. Omit hintName to list; pass it to read the matching files.")]
     public Task<string> GeneratedSourcesAsync(
         [Description("Restrict to one project by name (default: all projects)")] string? projectName = null,
-        [Description("Read the generated files whose hint name or generator path contains this text, e.g. 'MyType.g.cs' (omit to list)")] string? hintName = null,
+        [Description(
+            "Read the generated files whose hint name or generator path contains this text, e.g. 'MyType.g.cs' "
+            + "(omit to list)")]
+        string? hintName = null,
         CancellationToken cancellationToken = default)
     {
         return ToolBase.ExecuteAsync(logger, "csharp_generated_sources", async ct =>
@@ -142,11 +161,15 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
             var solution = await workspace.GetSolutionAsync(null, overlay: null, ct);
 
             var projects = solution.Projects
-                .Where(p => projectName is null || string.Equals(p.Name, projectName, StringComparison.OrdinalIgnoreCase))
+                .Where(
+                    p => projectName is null || string.Equals(p.Name, projectName, StringComparison.OrdinalIgnoreCase))
                 .ToArray();
 
             if (projects.Length == 0)
-                return $"Error: No project named '{projectName}'. Loaded: {string.Join(", ", solution.Projects.Select(p => p.Name))}";
+            {
+                var loaded = string.Join(", ", solution.Projects.Select(p => p.Name));
+                return $"Error: No project named '{projectName}'. Loaded: {loaded}";
+            }
 
             return await DescribeGeneratedSourcesAsync(projects, hintName, ct);
         }, cancellationToken);
@@ -231,7 +254,10 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
     /// Resolves a type by metadata name first, then by a source declaration search, so both
     /// 'System.Collections.Generic.List`1' and a bare 'SymbolResolver' work.
     /// </summary>
-    internal static async Task<INamedTypeSymbol?> FindTypeAsync(Solution solution, string typeName, CancellationToken ct)
+    internal static async Task<INamedTypeSymbol?> FindTypeAsync(
+        Solution solution,
+        string typeName,
+        CancellationToken ct)
     {
         foreach (var project in solution.Projects)
         {
@@ -307,7 +333,8 @@ public sealed class StructureTools(ILogger<StructureTools> logger, RoslynWorkspa
                         .FirstOrDefault(m => m.Kind == SymbolKind.Property);
 
                     if (property is not null)
-                        sb.AppendLine($"{childIndent}{property.ToDisplayString(SymbolFormatter.Member)}   [Property, line {line}]");
+                        sb.AppendLine(
+                            $"{childIndent}{property.ToDisplayString(SymbolFormatter.Member)}   [Property, line {line}]");
                 }
             }
 

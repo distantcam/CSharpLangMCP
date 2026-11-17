@@ -1,4 +1,4 @@
-using CSharpLangMCP.Roslyn;
+﻿using CSharpLangMCP.Roslyn;
 using CSharpLangMCP.Tools;
 using Microsoft.CodeAnalysis;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -12,7 +12,7 @@ namespace CSharpLangMCP.Tests;
 /// </summary>
 public class DiagnosticsTests
 {
-    private static readonly AnalyzerService Service = new(NullLogger<AnalyzerService>.Instance);
+    private static readonly AnalyzerService s_service = new(NullLogger<AnalyzerService>.Instance);
 
     /// <summary>
     /// Rethrowing by name trips CA2200 and the braceless <c>if</c> trips IDE0011 - two analyzer
@@ -47,13 +47,13 @@ public class DiagnosticsTests
     }
 
     /// <summary>Adds the probe to the in-memory solution only; nothing is written to disk.</summary>
-    private static async Task<Document> ProbeDocumentAsync() =>
-        (await ServerProjectAsync()).AddDocument("AnalyzerProbe.cs", Probe);
+    private static async Task<Document> ProbeDocumentAsync()
+        => (await ServerProjectAsync()).AddDocument("AnalyzerProbe.cs", Probe);
 
     [Test]
     public async Task LoadsTheAnalyzersTheProjectConfigures()
     {
-        var analyzers = Service.GetAnalyzers(await ServerProjectAsync());
+        var analyzers = s_service.GetAnalyzers(await ServerProjectAsync());
 
         // The SDK contributes NetAnalyzers and the C# code-style analyzers to every project here.
         // An empty set means analyzer references failed to load, which is silent otherwise.
@@ -68,7 +68,7 @@ public class DiagnosticsTests
         var compilerOnly = (await document.GetSemanticModelAsync())!.GetDiagnostics();
         await Assert.That(compilerOnly.Any(d => d.Id == "CA2200")).IsFalse();
 
-        var analyzer = await Service.GetFileDiagnosticsAsync(document, CancellationToken.None);
+        var analyzer = await s_service.GetFileDiagnosticsAsync(document, CancellationToken.None);
         var ca2200 = analyzer.Where(d => d.Id == "CA2200").ToArray();
 
         await Assert.That(ca2200).IsNotEmpty();
@@ -81,7 +81,7 @@ public class DiagnosticsTests
     [Test]
     public async Task AnalyzerResultsAreAdditiveToTheCompilers()
     {
-        var analyzer = await Service.GetFileDiagnosticsAsync(await ProbeDocumentAsync(), CancellationToken.None);
+        var analyzer = await s_service.GetFileDiagnosticsAsync(await ProbeDocumentAsync(), CancellationToken.None);
 
         // Callers concatenate these with Compilation.GetDiagnostics without deduplicating, which is
         // only safe because the analyzer pass never re-reports a compiler diagnostic.
@@ -92,7 +92,7 @@ public class DiagnosticsTests
     public async Task FileScopedAnalysisStaysWithinTheFile()
     {
         var document = await ProbeDocumentAsync();
-        var analyzer = await Service.GetFileDiagnosticsAsync(document, CancellationToken.None);
+        var analyzer = await s_service.GetFileDiagnosticsAsync(document, CancellationToken.None);
 
         // The point of the per-file entry points is not paying for the whole compilation; a result
         // located in another file would mean the scoping had been lost.
@@ -110,8 +110,8 @@ public class DiagnosticsTests
         var workspace = new AdhocWorkspace();
         var project = workspace.AddProject("Bare", LanguageNames.CSharp);
 
-        await Assert.That(Service.GetAnalyzers(project)).IsEmpty();
-        await Assert.That(await Service.GetProjectDiagnosticsAsync(project, CancellationToken.None)).IsEmpty();
+        await Assert.That(s_service.GetAnalyzers(project)).IsEmpty();
+        await Assert.That(await s_service.GetProjectDiagnosticsAsync(project, CancellationToken.None)).IsEmpty();
     }
 
     /// <summary>
@@ -135,9 +135,10 @@ public class DiagnosticsTests
 
         await Assert.That(compilerOnly.Any(a => a.DiagnosticId == "IDE0011")).IsFalse();
 
-        var analyzerDiagnostics = await Service.GetFileDiagnosticsAsync(document, CancellationToken.None);
+        var analyzerDiagnostics = await s_service.GetFileDiagnosticsAsync(document, CancellationToken.None);
         var withAnalyzers = await codeActions.GetActionsAsync(
-            document, span, analyzerDiagnostics, includeFixes: true, includeRefactorings: false, CancellationToken.None);
+            document, span, analyzerDiagnostics, includeFixes: true, includeRefactorings: false, CancellationToken
+                .None);
 
         await Assert.That(withAnalyzers.Any(a => a.DiagnosticId == "IDE0011")).IsTrue();
         await Assert.That(withAnalyzers.Select(a => a.Title)).Contains("Add braces");
@@ -147,7 +148,7 @@ public class DiagnosticsTests
     public async Task ToolSaysSoWhenAnalyzersWereNotRun()
     {
         var (service, _) = await WorkspaceFixture.GetAsync();
-        var tool = new WorkspaceTools(NullLogger<WorkspaceTools>.Instance, service, Service);
+        var tool = new WorkspaceTools(NullLogger<WorkspaceTools>.Instance, service, s_service);
 
         var file = Path.Combine(WorkspaceFixture.RepositoryRoot, "src", "CSharpLangMCP", "Program.cs");
         var result = await tool.GetDiagnosticsAsync(file, includeAnalyzers: false);

@@ -1,4 +1,4 @@
-using CSharpLangMCP.Roslyn;
+﻿using CSharpLangMCP.Roslyn;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -39,7 +39,8 @@ public class CodeActionTests
             name: "Fx",
             assemblyName: "Fx",
             language: LanguageNames.CSharp,
-            compilationOptions: new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary),
+            compilationOptions: new Microsoft.CodeAnalysis.CSharp.CSharpCompilationOptions(
+                OutputKind.DynamicallyLinkedLibrary),
             metadataReferences: AppDomain.CurrentDomain.GetAssemblies()
                 .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
                 .Select(a => MetadataReference.CreateFromFile(a.Location))
@@ -71,7 +72,8 @@ public class CodeActionTests
 
         await Assert.That(actions.Select(a => a.Title)).Contains("using System.Collections.Generic;");
         await Assert.That(actions.All(a => a.Kind == CodeActionKind.Fix)).IsTrue();
-        await Assert.That(actions.First(a => a.Title == "using System.Collections.Generic;").DiagnosticId).IsEqualTo("CS0246");
+        await Assert.That(actions.First(a => a.Title == "using System.Collections.Generic;").DiagnosticId)
+            .IsEqualTo("CS0246");
     }
 
     [Test]

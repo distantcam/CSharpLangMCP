@@ -1,14 +1,11 @@
 ﻿<Project>
 
   <PropertyGroup>
-    <!-- Must live here, not in a .csproj: MSBuild ordering constraints (NETSDK1199). -->
-    <UseArtifactsOutput>true</UseArtifactsOutput>
-  </PropertyGroup>
-
-  <PropertyGroup>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <LangVersion>latest</LangVersion>
+    <UseArtifactsOutput>true</UseArtifactsOutput>
+    <TestingPlatformDotnetTestSupport>true</TestingPlatformDotnetTestSupport>
   </PropertyGroup>
 
   <PropertyGroup>

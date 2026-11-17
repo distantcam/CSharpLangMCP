@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using CSharpLangMCP.Roslyn;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
@@ -78,8 +78,8 @@ internal static class ChangePreview
     }
 
     /// <summary>The 1-based line an edit starts on.</summary>
-    public static int LineOf(SourceText text, TextChange change) =>
-        text.Lines.GetLinePosition(change.Span.Start).Line + 1;
+    public static int LineOf(SourceText text, TextChange change)
+        => text.Lines.GetLinePosition(change.Span.Start).Line + 1;
 
     /// <summary>
     /// Renders one edit as an insertion, a removal, or a replacement, with both halves put through

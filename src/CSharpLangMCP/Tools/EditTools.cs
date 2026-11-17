@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text;
 using CSharpLangMCP.Roslyn;
 using Microsoft.CodeAnalysis;
@@ -15,9 +15,13 @@ namespace CSharpLangMCP.Tools;
 public sealed class EditTools(ILogger<EditTools> logger, RoslynWorkspaceService workspace)
 {
     [McpServerTool(Name = "csharp_rename")]
-    [Description("Rename a symbol everywhere it is used. Previews the edits by default; pass apply=true to write them to disk.")]
+    [Description(
+        "Rename a symbol everywhere it is used. Previews the edits by default; pass apply=true to write them to disk.")]
     public Task<string> RenameAsync(
-        [Description("Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'. Omit to use filePath/line/character instead.")] string? symbol = null,
+        [Description(
+            "Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'. Omit to use "
+            + "filePath/line/character instead.")]
+        string? symbol = null,
         [Description("The new name")] string newName = "",
         [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
@@ -40,7 +44,10 @@ public sealed class EditTools(ILogger<EditTools> logger, RoslynWorkspaceService 
             var (target, solution) = (resolved.Symbol!, resolved.Solution!);
 
             if (!target.Locations.Any(l => l.IsInSource))
-                return $"Error: {target.ToDisplayString(SymbolFormatter.Signature)} is defined in metadata and cannot be renamed.";
+            {
+                return $"Error: {target.ToDisplayString(SymbolFormatter.Signature)} is defined in metadata "
+                    + "and cannot be renamed.";
+            }
 
             var options = new SymbolRenameOptions(
                 RenameOverloads: true,
@@ -61,7 +68,9 @@ public sealed class EditTools(ILogger<EditTools> logger, RoslynWorkspaceService 
     }
 
     [McpServerTool(Name = "csharp_format")]
-    [Description("Format a C# file using the solution's .editorconfig settings. Previews the change by default; pass apply=true to write it.")]
+    [Description(
+        "Format a C# file using the solution's .editorconfig settings. Previews the change by default; pass "
+        + "apply=true to write it.")]
     public Task<string> FormatAsync(
         [Description("Absolute path to the C# file")] string filePath,
         [Description("Write the formatted file to disk. Default false.")] bool apply = false,
@@ -94,10 +103,10 @@ public sealed class EditTools(ILogger<EditTools> logger, RoslynWorkspaceService 
     }
 
     /// <summary>Renders a whitespace-only edit readably, since the raw text is invisible.</summary>
-    private static string DescribeWhitespaceChange(SourceText text, TextChange change) =>
-        ChangePreview.DescribeEdit(text, change, static value =>
+    private static string DescribeWhitespaceChange(SourceText text, TextChange change)
+        => ChangePreview.DescribeEdit(text, change, static value =>
             value.Replace("\r\n", "\\n", StringComparison.Ordinal)
-                 .Replace("\n", "\\n", StringComparison.Ordinal)
-                 .Replace("\t", "\\t", StringComparison.Ordinal)
-                 .Replace(" ", "·", StringComparison.Ordinal));
+                .Replace("\n", "\\n", StringComparison.Ordinal)
+                .Replace("\t", "\\t", StringComparison.Ordinal)
+                .Replace(" ", "·", StringComparison.Ordinal));
 }

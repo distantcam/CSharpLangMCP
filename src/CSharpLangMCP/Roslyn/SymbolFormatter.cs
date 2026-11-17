@@ -1,4 +1,4 @@
-using System.Text;
+﻿using System.Text;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.Text;
 
@@ -95,7 +95,8 @@ internal static class SymbolFormatter
     public static string FormatAmbiguity(IReadOnlyList<ISymbol> candidates)
     {
         var sb = new StringBuilder();
-        sb.AppendLine($"'{candidates[0].Name}' is ambiguous - {candidates.Count} symbols match. Re-run with one of these ids:");
+        sb.AppendLine(
+            $"'{candidates[0].Name}' is ambiguous - {candidates.Count} symbols match. Re-run with one of these ids:");
         sb.AppendLine();
 
         foreach (var candidate in candidates)
@@ -104,8 +105,8 @@ internal static class SymbolFormatter
         return sb.ToString();
     }
 
-    public static string Truncate(string value, int max) =>
-        value.Length <= max ? value : value[..max] + "...";
+    public static string Truncate(string value, int max)
+        => value.Length <= max ? value : value[..max] + "...";
 
     /// <summary>Appends a trailing note when a result set was capped.</summary>
     public static void AppendTruncationNote(StringBuilder sb, int shown, int total, string noun)

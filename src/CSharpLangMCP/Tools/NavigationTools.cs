@@ -1,4 +1,4 @@
-using System.ComponentModel;
+﻿using System.ComponentModel;
 using System.Text;
 using CSharpLangMCP.Roslyn;
 using Microsoft.CodeAnalysis;
@@ -15,10 +15,15 @@ namespace CSharpLangMCP.Tools;
 public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorkspaceService workspace)
 {
     [McpServerTool(Name = "csharp_find_symbol")]
-    [Description("Search the whole solution for declared symbols by name or wildcard pattern. Start here: the ids it returns address a symbol exactly for the other tools, with no file position needed.")]
+    [Description(
+        "Search the whole solution for declared symbols by name or wildcard pattern. Start here: the ids it "
+        + "returns address a symbol exactly for the other tools, with no file position needed.")]
     public Task<string> FindSymbolAsync(
         [Description("Name or substring to search for, e.g. 'LoadAsync' or 'SymbolResolver'")] string query,
-        [Description("Restrict to a kind: Class, Struct, Interface, Enum, Method, Property, Field, Event, Namespace. Omit for all.")] string? kind = null,
+        [Description(
+            "Restrict to a kind: Class, Struct, Interface, Enum, Method, Property, Field, Event, Namespace. Omit "
+            + "for all.")]
+        string? kind = null,
         [Description("Maximum results (default 50)")] int maxResults = 50,
         CancellationToken cancellationToken = default)
     {
@@ -37,7 +42,10 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
             if (kind is not null)
             {
                 if (!TryParseKind(kind, out var predicate))
-                    return $"Error: Unknown kind '{kind}'. Use Class, Struct, Interface, Enum, Method, Property, Field, Event or Namespace.";
+                {
+                    return $"Error: Unknown kind '{kind}'. Use Class, Struct, Interface, Enum, Method, Property, "
+                        + "Field, Event or Namespace.";
+                }
 
                 symbols = symbols.Where(predicate).ToList();
             }
@@ -70,9 +78,14 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     }
 
     [McpServerTool(Name = "csharp_symbol_info")]
-    [Description("Get the signature, documentation, base types and declaration sites of a symbol. Combines what hover and go-to-definition used to return separately.")]
+    [Description(
+        "Get the signature, documentation, base types and declaration sites of a symbol. Combines what hover and "
+        + "go-to-definition used to return separately.")]
     public Task<string> SymbolInfoAsync(
-        [Description("Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'. Omit to use filePath/line/character instead.")] string? symbol = null,
+        [Description(
+            "Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'. Omit to use "
+            + "filePath/line/character instead.")]
+        string? symbol = null,
         [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
@@ -136,7 +149,8 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
             }
             else
             {
-                sb.AppendLine($"Declared in metadata: {SymbolFormatter.Describe(target.Locations.FirstOrDefault() ?? Location.None)}");
+                var location = target.Locations.FirstOrDefault() ?? Location.None;
+                sb.AppendLine($"Declared in metadata: {SymbolFormatter.Describe(location)}");
             }
 
             return sb.ToString();
@@ -144,9 +158,14 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     }
 
     [McpServerTool(Name = "csharp_references")]
-    [Description("Find every reference to a symbol across the solution, grouped by file, with the source line at each use site.")]
+    [Description(
+        "Find every reference to a symbol across the solution, grouped by file, with the source line at each use "
+        + "site.")]
     public Task<string> ReferencesAsync(
-        [Description("Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'. Omit to use filePath/line/character instead.")] string? symbol = null,
+        [Description(
+            "Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'. Omit to use "
+            + "filePath/line/character instead.")]
+        string? symbol = null,
         [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
@@ -220,7 +239,8 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                 {
                     var position = text.Lines.GetLinePosition(site.Location.SourceSpan.Start);
                     var source = text.Lines[position.Line].ToString().Trim();
-                    sb.AppendLine($"  {position.Line + 1}:{position.Character + 1}  {SymbolFormatter.Truncate(source, 200)}");
+                    sb.AppendLine(
+                        $"  {position.Line + 1}:{position.Character + 1}  {SymbolFormatter.Truncate(source, 200)}");
                 }
 
                 shown += ordered.Length;
@@ -233,13 +253,18 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     }
 
     [McpServerTool(Name = "csharp_implementations")]
-    [Description("Find implementations of an interface or interface member, types derived from a class, and overrides of a virtual or abstract member.")]
+    [Description(
+        "Find implementations of an interface or interface member, types derived from a class, and overrides of a "
+        + "virtual or abstract member.")]
     public Task<string> ImplementationsAsync(
         [Description("Symbol id from csharp_find_symbol, or a type or member name")] string? symbol = null,
         [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
-        [Description("Only report results declared in this solution's source. Turn off to include types from referenced assemblies, which for a BCL interface can be hundreds. Default true.")] bool sourceOnly = true,
+        [Description(
+            "Only report results declared in this solution's source. Turn off to include types from referenced "
+            + "assemblies, which for a BCL interface can be hundreds. Default true.")]
+        bool sourceOnly = true,
         [Description("Maximum results (default 100)")] int maxResults = 100,
         CancellationToken cancellationToken = default)
     {
@@ -260,18 +285,28 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
             {
                 if (type.TypeKind == TypeKind.Interface)
                 {
-                    foreach (var found in await SymbolFinder.FindImplementationsAsync(type, solution, cancellationToken: ct))
+                    foreach (var found in await SymbolFinder.FindImplementationsAsync(
+                        type,
+                        solution,
+                        cancellationToken: ct))
                         results.Add(("implements", found));
                 }
                 else
                 {
-                    foreach (var found in await SymbolFinder.FindDerivedClassesAsync(type, solution, transitive: true, cancellationToken: ct))
+                    foreach (var found in await SymbolFinder.FindDerivedClassesAsync(
+                        type,
+                        solution,
+                        transitive: true,
+                        cancellationToken: ct))
                         results.Add(("derives from", found));
                 }
             }
             else
             {
-                foreach (var found in await SymbolFinder.FindImplementationsAsync(target, solution, cancellationToken: ct))
+                foreach (var found in await SymbolFinder.FindImplementationsAsync(
+                    target,
+                    solution,
+                    cancellationToken: ct))
                     results.Add(("implements", found));
 
                 foreach (var found in await SymbolFinder.FindOverridesAsync(target, solution, cancellationToken: ct))
@@ -315,13 +350,16 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     }
 
     [McpServerTool(Name = "csharp_type_hierarchy")]
-    [Description("Show a type's full hierarchy in one call: its base class chain and interfaces above it, and the tree of types deriving from or implementing it below.")]
+    [Description(
+        "Show a type's full hierarchy in one call: its base class chain and interfaces above it, and the tree of "
+        + "types deriving from or implementing it below.")]
     public Task<string> TypeHierarchyAsync(
         [Description("Symbol id from csharp_find_symbol, or a type name")] string? symbol = null,
         [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
-        [Description("Only report derived types declared in this solution's source. Default true.")] bool sourceOnly = true,
+        [Description(
+            "Only report derived types declared in this solution's source. Default true.")] bool sourceOnly = true,
         [Description("Maximum derived types (default 100)")] int maxResults = 100,
         CancellationToken cancellationToken = default)
     {
@@ -381,7 +419,11 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
         // Below: every derived type, then each hung under its nearest ancestor in the result.
         var derived = type.TypeKind == TypeKind.Interface
             ? (await SymbolFinder.FindImplementationsAsync(type, solution, transitive: true, cancellationToken: ct))
-                .Concat(await SymbolFinder.FindDerivedInterfacesAsync(type, solution, transitive: true, cancellationToken: ct))
+                .Concat(await SymbolFinder.FindDerivedInterfacesAsync(
+                    type,
+                    solution,
+                    transitive: true,
+                    cancellationToken: ct))
             : await SymbolFinder.FindDerivedClassesAsync(type, solution, transitive: true, cancellationToken: ct);
 
         var below = derived
@@ -421,7 +463,11 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                 var indent = new string(' ', depth * 2);
                 sb.AppendLine($"{indent}{child.ToDisplayString()}");
                 if (child.Locations.FirstOrDefault(l => l.IsInSource) is { } location)
-                    SymbolFormatter.AppendLocationLine(sb, location, await texts.ForAsync(location, ct), indent + "    ");
+                    SymbolFormatter.AppendLocationLine(
+                        sb,
+                        location,
+                        await texts.ForAsync(location, ct),
+                        indent + "    ");
 
                 await AppendChildrenAsync(child, depth + 1);
             }
@@ -445,9 +491,11 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     }
 
     [McpServerTool(Name = "csharp_callers")]
-    [Description("Find the methods that call a given method or access a given property or field, with the calling source line.")]
+    [Description(
+        "Find the methods that call a given method or access a given property or field, with the calling source line.")]
     public Task<string> CallersAsync(
-        [Description("Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'")] string? symbol = null,
+        [Description(
+            "Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'")] string? symbol = null,
         [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
@@ -499,14 +547,22 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     }
 
     [McpServerTool(Name = "csharp_callees")]
-    [Description("Find what a method, constructor or property calls: the methods, constructors and properties its body invokes, including inside lambdas and local functions. The reverse of csharp_callers.")]
+    [Description(
+        "Find what a method, constructor or property calls: the methods, constructors and properties its body "
+        + "invokes, including inside lambdas and local functions. The reverse of csharp_callers.")]
     public Task<string> CalleesAsync(
-        [Description("Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'")] string? symbol = null,
+        [Description(
+            "Symbol id from csharp_find_symbol, or a name like 'SymbolResolver.ResolveAsync'")] string? symbol = null,
         [Description("Absolute path to a .cs file, when locating by position")] string? filePath = null,
         [Description("0-based line number, when locating by position")] int line = 0,
         [Description("0-based character position, when locating by position")] int character = 0,
-        [Description("Only report callees declared in this solution's source, hiding BCL and package calls. Default false.")] bool sourceOnly = false,
-        [Description("Include reads and writes of auto-properties and positional record properties, which are field access in all but name. Turn off to see only calls that run code. Default true.")] bool includeAutoProperties = true,
+        [Description(
+            "Only report callees declared in this solution's source, hiding BCL and package calls. Default false.")]
+        bool sourceOnly = false,
+        [Description(
+            "Include reads and writes of auto-properties and positional record properties, which are field access "
+            + "in all but name. Turn off to see only calls that run code. Default true.")]
+        bool includeAutoProperties = true,
         [Description("Maximum callees to return (default 100)")] int maxResults = 100,
         CancellationToken cancellationToken = default)
     {
@@ -518,15 +574,29 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
             if (resolved.Error is { } failure)
                 return failure;
 
-            return await DescribeCalleesAsync(resolved.Solution!, resolved.Symbol!, sourceOnly, includeAutoProperties, maxResults, ct);
+            return await DescribeCalleesAsync(
+                resolved.Solution!,
+                resolved.Symbol!,
+                sourceOnly,
+                includeAutoProperties,
+                maxResults,
+                ct);
         }, cancellationToken);
     }
 
     internal static async Task<string> DescribeCalleesAsync(
-        Solution solution, ISymbol target, bool sourceOnly, bool includeAutoProperties, int maxResults, CancellationToken ct)
+        Solution solution,
+        ISymbol target,
+        bool sourceOnly,
+        bool includeAutoProperties,
+        int maxResults,
+        CancellationToken ct)
     {
         if (target.DeclaringSyntaxReferences.Length == 0)
-            return $"Error: {target.ToDisplayString()} is declared in metadata, so it has no body here. Use csharp_decompile to read it.";
+        {
+            return $"Error: {target.ToDisplayString()} is declared in metadata, so it has no body here. "
+                + "Use csharp_decompile to read it.";
+        }
 
         var sites = new List<(ISymbol Callee, Location Site)>();
 
@@ -563,7 +633,8 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
                     if (sourceOnly && !callee.Locations.Any(l => l.IsInSource))
                         continue;
 
-                    if (!includeAutoProperties && callee is IPropertySymbol calledProperty && IsAutoProperty(calledProperty))
+                    if (!includeAutoProperties && callee is IPropertySymbol calledProperty
+                        && IsAutoProperty(calledProperty))
                         continue;
 
                     sites.Add((callee, NameLocation(operation.Syntax)));
@@ -635,8 +706,8 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
     /// record property. Reading one runs no code of the caller's, so it is data access, not a call.
     /// A property from metadata cannot be told apart and is never treated as one.
     /// </summary>
-    private static bool IsAutoProperty(IPropertySymbol property) =>
-        property.DeclaringSyntaxReferences.Length > 0 &&
+    private static bool IsAutoProperty(IPropertySymbol property)
+        => property.DeclaringSyntaxReferences.Length > 0 &&
         property.DeclaringSyntaxReferences.All(r => r.GetSyntax() switch
         {
             ParameterSyntax => true,
@@ -705,7 +776,8 @@ public sealed class NavigationTools(ILogger<NavigationTools> logger, RoslynWorks
         if (symbol.IsExtern) modifiers.Add("extern");
         if (symbol is IMethodSymbol { IsAsync: true }) modifiers.Add("async");
         if (symbol is INamedTypeSymbol { IsRecord: true }) modifiers.Add("record");
-        if (symbol is INamedTypeSymbol { IsReadOnly: true } or IFieldSymbol { IsReadOnly: true }) modifiers.Add("readonly");
+        if (symbol is INamedTypeSymbol { IsReadOnly: true } or IFieldSymbol { IsReadOnly: true }) modifiers.Add(
+            "readonly");
         return [.. modifiers];
     }
 

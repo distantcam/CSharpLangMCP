@@ -1,4 +1,4 @@
-using Microsoft.CodeAnalysis;
+﻿using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FindSymbols;
 using Microsoft.CodeAnalysis.Text;
 
@@ -134,7 +134,8 @@ internal static class SymbolResolver
         {
             // Retry case-insensitively before giving up.
             candidates = (await SymbolFinder.FindSourceDeclarationsAsync(
-                solution, simpleName, ignoreCase: true, SymbolFilter.All, ct)).ToList();
+                solution, simpleName, ignoreCase: true, SymbolFilter.All, ct))
+                .ToList();
         }
 
         if (symbol.Contains('.'))
@@ -176,7 +177,8 @@ internal static class SymbolResolver
         var textLine = text.Lines[line];
         if (character > textLine.Span.Length)
         {
-            error = $"Character {character + 1} is past the end of line {line + 1} ({textLine.Span.Length} character(s)).";
+            error = $"Character {character + 1} is past the end of line {line + 1} "
+                + $"({textLine.Span.Length} character(s)).";
             return false;
         }
 
@@ -215,12 +217,12 @@ internal static class SymbolResolver
     }
 
     /// <summary>True when the string carries an XML documentation id prefix such as "M:" or "T:".</summary>
-    private static bool LooksLikeDocumentationId(string value) =>
-        value.Length > 2 && value[1] == ':' && "NTMPFE".Contains(value[0], StringComparison.Ordinal);
+    private static bool LooksLikeDocumentationId(string value)
+        => value.Length > 2 && value[1] == ':' && "NTMPFE".Contains(value[0], StringComparison.Ordinal);
 
     /// <summary>One symbol per id, in first-seen order; a symbol without an id stands for itself.</summary>
-    private static List<ISymbol> DistinctById(IReadOnlyList<ISymbol> symbols) =>
-        symbols
+    private static List<ISymbol> DistinctById(IReadOnlyList<ISymbol> symbols)
+        => symbols
             .GroupBy(s => IdFor(s) ?? s.ToDisplayString(), StringComparer.Ordinal)
             .Select(g => g.First())
             .ToList();
