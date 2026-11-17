@@ -1,5 +1,10 @@
 # CSharpLangMCP
 
+[![NuGet Status](https://img.shields.io/nuget/v/CSharpLangMCP.svg)](https://www.nuget.org/packages/CSharpLangMCP/)
+[![Nuget Downloads](https://img.shields.io/nuget/dt/csharplangmcp.svg)](https://www.nuget.org/packages/CSharpLangMCP/)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/distantcam/csharplangmcp/build.yml)](https://github.com/distantcam/CSharpLangMCP/actions/workflows/build.yml)
+![GitHub last commit](https://img.shields.io/github/last-commit/distantcam/csharplangmcp)
+
 An MCP server that exposes C# semantic analysis — diagnostics, symbol search, navigation, references, type inspection and rename — as MCP tools, built directly on [Roslyn](https://github.com/dotnet/roslyn).
 
 Communicates over **stdio**. Advertised server name: `csharplang-mcp`.
