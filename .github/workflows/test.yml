@@ -1,0 +1,42 @@
+name: 🧪 test
+
+on:
+  workflow_call:
+
+jobs:
+  test:
+    name: 🧪 Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🛒 Check-out code
+        uses: actions/checkout@v7
+
+      - name: 📐 Setup .NET Core SDK
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: 📦 Cache NuGet packages
+        uses: actions/cache@v6
+        with:
+          path: ~/.nuget/packages
+          key: nuget-${{ hashFiles('**/Directory.Packages.props') }}
+          restore-keys: nuget-
+
+      - name: 🔍 Enable problem matchers
+        run: echo "::add-matcher::.github/matchers/dotnet.json"
+
+      - name: ⚙️ Enable Automated Test Report Artifact Upload
+        uses: actions/github-script@v9
+        with:
+          script: |
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env['ACTIONS_RUNTIME_TOKEN']);
+            core.exportVariable('ACTIONS_RESULTS_URL', process.env['ACTIONS_RESULTS_URL']);
+
+      - name: 🛠️ Build code
+        run: dotnet build --configuration Release
+
+      - name: 🧪 Testing code
+        run: >
+          dotnet test
+          --configuration Release

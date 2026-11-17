@@ -7,10 +7,6 @@
   </PropertyGroup>
 
   <PropertyGroup>
-    <!-- Ships as a .NET tool: `dotnet tool install -g CSharpLangMCP`, or `dnx CSharpLangMCP` to run
-         without installing. The SDK is a runtime prerequisite anyway (Roslyn evaluates project
-         files through its out-of-process MSBuild build host), so everyone who can run this
-         already has `dotnet`. -->
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>csharplang-mcp</ToolCommandName>
     <PackageId>CSharpLangMCP</PackageId>
@@ -23,6 +19,10 @@
   <ItemGroup>
     <InternalsVisibleTo Include="CSharpLangMCP.Tests" />
     <None Include="../../README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>
